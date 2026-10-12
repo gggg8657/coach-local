@@ -33,6 +33,7 @@ WS = os.environ.get("WORKSPACE") or os.path.join(ROOT, "_workspace")  # 포털�
 LLM_API = os.environ.get("LLM_API", "ollama")            # ollama | openai
 LLM_BASE = os.environ.get("LLM_BASE_URL", "http://localhost:8000/v1" if LLM_API == "openai" else "http://localhost:11434").rstrip("/")
 MODEL = os.environ.get("LLM_MODEL", "qwen3:8b")
+STYLE_MODEL = os.environ.get("STYLE_MODEL", "")   # 실험용: 문체·형식 검사만 다른 모델로(비우면 LLM_MODEL·화면에서 고른 모델)
 LLM_KEY = os.environ.get("LLM_API_KEY", "")
 NUM_CTX = int(os.environ.get("NUM_CTX", "32768"))   # 포털은 모든 도구에 같은 값을 넘김 — 도구마다 다르면 Ollama 가 모델을 다시 올림
 PORT = int(os.environ.get("PORT", "8798"))
@@ -327,7 +328,7 @@ def check(units, persona, purpose="", model=MODEL, stop=lambda: False, passes=("
 
     def run(k):
         try:
-            res[k] = llm(jobs[k][0], jobs[k][2], model, stop).get("s") or []
+            res[k] = llm(jobs[k][0], jobs[k][2], (STYLE_MODEL or model) if k == "style" else model, stop).get("s") or []
         except Exception as e:  # noqa: BLE001 — 한쪽이 실패해도 다른 쪽 결과는 살린다
             res[k] = e
     ts = [threading.Thread(target=run, args=(k,)) for k in jobs]
