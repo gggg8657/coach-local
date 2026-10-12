@@ -72,6 +72,8 @@
   details.menu>div button{border:none;text-align:left}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:7px 16px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30}
   .toast.on{opacity:.95}
+  .kindbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fff8e6;border:1px solid #f3d99b;color:#7a5200;border-radius:9px;padding:7px 12px;margin-bottom:8px;font-size:13.5px}
+  .kindbar span{flex:1;min-width:0}
   .vers li{list-style:none;display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0}.vers{padding:0;margin:0}
 </style>
 </head>
@@ -102,6 +104,7 @@
 
 <div class="cols">
   <div>
+    <div class="kindbar" id="kindbar" hidden></div>
     <div class="ed" id="ed">
       <div class="bd" id="bd"></div>
       <textarea id="ta" spellcheck="false" placeholder="여기에 글을 쓰세요. 잠깐 멈추면(약 1초) 바뀐 문단만 다시 읽고 고칠 곳을 표시합니다.&#10;&#10;밑줄 친 곳을 누르면 제안이 뜹니다."></textarea>
@@ -170,7 +173,10 @@ async function api(p, body) {
 // ── 상태 ────────────────────────────────────────────────────────────────
 const ta = $('ta'), bd = $('bd');
 let PERSONAS = [], persona = null, doc = { id: '', versions: 0 };
-const cache = new Map();        // 문단 글자 그대로 → {s:[제안]} : 같은 문단은 다시 묻지 않음, 되돌리면 제안도 돌아옴
+const cache = new Map();        // 문단 글자 그대로 → {spell:[…], style:[…]} : 같은 문단은 다시 묻지 않음, 되돌리면 제안도 돌아옴
+const PASSES = ['spell', 'style'];   // 맞춤법(작고 빠름) 먼저, 문체·형식은 다음
+const sugsOf = e => e ? [...(e.spell || []), ...(e.style || [])] : [];
+const checked = l => { const e = cache.get(l); return !!e && PASSES.every(p => e[p]); };
 const ignored = new Set();      // 무시한 제안 (원문\u0001제안)
 const inflight = new Map();     // 요청 id → {lines:Set, ctrl}
 let SUGS = [], active = null, timer = null, lastInput = 0, lats = [];
@@ -180,13 +186,14 @@ function lines() { return ta.value.split('\n'); }
 function compute() {
   const out = []; let off = 0;
   lines().forEach((ln, i) => {
-    const e = cache.get(ln), taken = [];
-    // 겹치는 제안(맞춤법 + 문장 다시 쓰기)은 짧은 쪽에 밑줄, 긴 쪽은 카드에만
-    if (e) for (const s of [...e.s].sort((a, b) => a.o.length - b.o.length)) {
+    const taken = [];
+    // 두 검사의 제안이 겹치면 맞춤법, 그다음 짧은 쪽만 남긴다. 문체·논리의 문장 다시 쓰기만 카드로 남김(밑줄은 짧은 쪽)
+    for (const s of sugsOf(cache.get(ln)).sort((a, b) => (b.c === '맞춤법') - (a.c === '맞춤법') || a.o.length - b.o.length)) {
       if (ignored.has(s.o + '\u0001' + s.n)) continue;
       const at = ln.substr(s.at, s.o.length) === s.o ? s.at : ln.indexOf(s.o);
       if (at < 0) continue;
       const nomark = taken.some(([a, b]) => at < b && at + s.o.length > a);
+      if (nomark && !((s.c === '문체' || s.c === '논리') && s.o.length >= 15)) continue;
       if (!nomark) taken.push([at, at + s.o.length]);
       out.push({ ...s, nomark, line: i, start: off + at, end: off + at + s.o.length, k: `${s.c}|${s.o}|${s.n}|${off + at}` });
     }
@@ -209,9 +216,9 @@ function render() {
   $('cats').innerHTML = Object.keys(CATS).filter(c => by[c]).map(c => `<div class="catrow">${chip(c)}<span class="n"><b>${by[c].length}</b>건</span>`
     + (c === '사실' ? '' : `<button class="sm" data-all="${c}">모두 적용</button>`) + `<button class="sm" data-none="${c}">모두 무시</button></div>`).join('');
   $('cards').innerHTML = SUGS.length ? SUGS.map(s => `<div class="card ${active === s.k ? 'on' : ''}" data-k="${esc(s.k)}"><div class="ch">${chip(s.c)}<span class="sp"></span>`
-    + (s.c === '사실' ? `<button class="sm" data-ok>확인함</button>` : `<button class="sm primary" data-acc>적용</button><button class="sm" data-rej>무시</button>`) + `</div>`
-    + (s.c === '사실' ? `<span>${esc(s.o)}</span>` : `<del>${esc(s.o)}</del> → <ins>${esc(s.n) || '(삭제)'}</ins>`) + `<div class="why">${esc(s.r)}${s.nomark ? ' · 밑줄은 겹친 다른 제안에' : ''}</div></div>`).join('')
-    : `<div class="empty">${ta.value.trim() ? (inflight.size || lines().some(l => l.trim().length >= 2 && !cache.has(l)) ? '읽는 중…' : '지금은 고칠 곳이 없습니다 ✓') : '글을 쓰기 시작하면 여기에 제안이 쌓입니다.'}</div>`;
+    + (s.c === '사실' && s.o === s.n ? `<button class="sm" data-ok>확인함</button>` : `<button class="sm primary" data-acc>적용</button><button class="sm" data-rej>${s.c === '사실' ? '확인함' : '무시'}</button>`) + `</div>`
+    + (s.c === '사실' && s.o === s.n ? `<span>${esc(s.o)}</span>` : `<del>${esc(s.o)}</del> → <ins>${esc(s.n) || '(삭제)'}</ins>`) + `<div class="why">${esc(s.r)}${s.nomark ? ' · 밑줄은 겹친 다른 제안에' : ''}</div></div>`).join('')
+    : `<div class="empty">${ta.value.trim() ? (inflight.size || lines().some(l => l.trim().length >= 2 && !checked(l)) ? '읽는 중…' : '지금은 고칠 곳이 없습니다 ✓') : '글을 쓰기 시작하면 여기에 제안이 쌓입니다.'}</div>`;
   if (active && !SUGS.some(s => s.k === active)) { active = null; $('pop').hidden = true; }
 }
 function status() {
@@ -221,43 +228,72 @@ function status() {
   if (lats.length) { const l = lats.slice(-10); $('lat').textContent = `응답 ${(l[l.length - 1] / 1000).toFixed(1)}초 (최근 평균 ${(l.reduce((a, b) => a + b, 0) / l.length / 1000).toFixed(1)}초)`; }
 }
 
-// ── 검사 일정: 멈춘 뒤 1.2초, 바뀐 문단만, 지난 요청은 취소 ───────────────────
-const MAXPAR = 2;
-function schedule(ms = 1200) { clearTimeout(timer); timer = setTimeout(pump, ms); }
+// ── 검사 일정: 멈춘 뒤 0.8초, 바뀐 문단만, 맞춤법 → 문체 순, 지난 요청은 취소 ────────────
+// 한 GPU 에서 두 요청을 동시에 돌리면 둘 다 느려지므로 한 번에 하나씩(지금 쓰는 문단만 끼어들 수 있음)
+function schedule(ms = 800) { clearTimeout(timer); timer = setTimeout(pump, ms); }
 function pump() {
+  kindHint();
   const cur = new Set(lines().filter(l => l.trim().length >= 2));
   const stale = [];
   for (const [rid, r] of inflight) if (![...r.lines].some(l => cur.has(l))) { r.ctrl.abort(); inflight.delete(rid); stale.push(rid); }
   if (stale.length) api('cancel', { rids: stale }).catch(() => { });
-  const busy = new Set([...inflight.values()].flatMap(r => [...r.lines]));
-  let todo = [...cur].filter(l => !cache.has(l) && !busy.has(l));
-  // 쓰고 있는 문단 먼저
   const caretLine = ta.value.slice(0, ta.selectionStart).split('\n').length - 1, cl = lines()[caretLine];
-  todo.sort((a, b) => (b === cl) - (a === cl));
-  if (todo[0] === cl && inflight.size < MAXPAR) send([todo.shift()]);   // 지금 쓰는 문단은 혼자 → 가장 빨리
-  while (todo.length && inflight.size < MAXPAR) {
-    const per = Math.max(1, Math.min(5, Math.ceil(todo.length / (MAXPAR - inflight.size)))), batch = []; let size = 0;
-    while (todo.length && batch.length < per && (size + todo[0].length < 700 || !batch.length)) { size += todo[0].length; batch.push(todo.shift()); }
-    send(batch);
+  const busy = p => new Set([...inflight.values()].filter(r => r.pass === p).flatMap(r => [...r.lines]));
+  const need = p => { const b = busy(p); return [...cur].filter(l => !(cache.get(l) || {})[p] && !b.has(l)); };
+  const caretBusy = [...inflight.values()].some(r => r.lines.has(cl));
+  for (const p of PASSES) if (!caretBusy && need(p).includes(cl) && inflight.size < 2) { send([cl], p); break; }   // 지금 쓰는 문단 먼저
+  for (const p of PASSES) {
+    if (inflight.size) break;
+    const todo = need(p).filter(l => l !== cl), batch = []; let size = 0;
+    while (todo.length && batch.length < 6 && (size + todo[0].length < 900 || !batch.length)) { size += todo[0].length; batch.push(todo.shift()); }
+    if (batch.length) send(batch, p);
   }
   status();
 }
-function send(batch) {
+function send(batch, pass) {
   const rid = Math.random().toString(36).slice(2, 10), ctrl = new AbortController(), t0 = performance.now(), typed = lastInput;
-  inflight.set(rid, { lines: new Set(batch), ctrl });
+  inflight.set(rid, { lines: new Set(batch), ctrl, pass });
   fetch('api/check', { method: 'POST', signal: ctrl.signal, headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rid, units: batch.map((t, i) => ({ id: 'p' + i, text: t })), persona, purpose: $('purpose').value, model: $('model').value || MODEL_DEFAULT }) })
+    body: JSON.stringify({ rid, pass, minimal: !$('kindbar').hidden, units: batch.map((t, i) => ({ id: 'p' + i, text: t })), persona, purpose: $('purpose').value, model: $('model').value || MODEL_DEFAULT }) })
     .then(r => r.json()).then(j => {
       if (!inflight.has(rid)) return;
       if (j.error) throw new Error(j.error);
       if (j.cancelled) return;
-      batch.forEach((t, i) => cache.set(t, { s: j.s.filter(s => s.p === 'p' + i) }));
+      batch.forEach((t, i) => cache.set(t, { ...(cache.get(t) || {}), [pass]: j.s.filter(s => s.p === 'p' + i) }));
       lats.push(performance.now() - t0); status.err = '';
-      console.debug('check', batch.length, 'units', Math.round(performance.now() - t0), 'ms, since pause', Math.round(performance.now() - typed), 'ms, dropped', j.dropped);
+      console.debug('check', pass, batch.length, 'units', Math.round(performance.now() - t0), 'ms, since pause', Math.round(performance.now() - typed), 'ms, dropped', j.dropped);
     })
-    .catch(e => { if (e.name !== 'AbortError') { status.err = e.message.slice(0, 80); batch.forEach(t => cache.set(t, { s: [], err: 1 })); } })
-    .finally(() => { inflight.delete(rid); render(); status(); if (inflight.size < MAXPAR) pump(); });
+    .catch(e => { if (e.name !== 'AbortError') { status.err = e.message.slice(0, 80); batch.forEach(t => cache.set(t, { ...(cache.get(t) || {}), [pass]: [], err: 1 })); } })
+    .finally(() => { inflight.delete(rid); render(); status(); pump(); });
 }
+// ── 글 종류 어긋남 안내: 문장 끝 모양으로 싸게 짐작(+전체 검토의 판단). 줄마다 갈아엎는 대신 한 번만 묻는다 ──
+const kindNo = new Set();   // '그대로 두기' 누른 (문서, 페르소나, 제안)
+function guessKind(t) {
+  const ss = t.split(/(?<=[.?!~])\s+|\n+/).map(x => x.trim()).filter(x => x.length >= 4);
+  if (ss.length < 3) return null;
+  const n = re => ss.filter(x => re.test(x)).length / ss.length;
+  if (!persona.builtin) return null;
+  const gae = n(/(함|음|임|바람|요망|것|끝)\.?$/);
+  const casual = ss.filter(x => /(요|여|죠|~)[.?!~]*$/.test(x)).length + (t.match(/ㅎㅎ|ㅋㅋ|\^\^|ㅠㅠ|ㅜㅜ/g) || []).length
+    + /안녕하세|안녕하십/.test(t) + /다름이 아니라|혹시|궁금해서|연락드/.test(t);
+  const items = (t.match(/^\s*(\d+|[가-하])[.)]\s/gm) || []).length;   // 1. 가. 같은 항목 = 공문·보고서 모양
+  if (casual >= 3 && gae < 0.3 && items < 2 && !['message', 'letter', 'intro'].includes(persona.id)) return 'message';
+  if (gae >= 0.5 && !['gongmun', 'report'].includes(persona.id)) return 'gongmun';
+  return null;
+}
+function kindHint(want) {
+  want = want || guessKind(ta.value);
+  const key = `${doc.id}|${persona.id}|${want}`, p = PERSONAS.find(x => x.id === want);
+  if (!p || p.id === persona.id || kindNo.has(key)) return $('kindbar').hidden = true;
+  $('kindbar').innerHTML = `<span>글 종류가 '<b>${esc(p.name)}</b>'에 가까워 보여요 — 바꿀까요? 지금은 '${esc(persona.name)}' 기준으로 고칠 곳을 찾고 있어요.</span><button class="sm primary" data-k="yes">바꾸기</button><button class="sm" data-k="no">그대로 두기</button>`;
+  $('kindbar').hidden = false;
+  $('kindbar').onclick = e => {
+    if (e.target.dataset.k === 'yes') { $('persona').value = p.id; $('persona').onchange(); }
+    if (e.target.dataset.k === 'no') kindNo.add(key);
+    if (e.target.dataset.k) $('kindbar').hidden = true;
+  };
+}
+
 function resetChecks() { for (const r of inflight.values()) r.ctrl.abort(); if (inflight.size) api('cancel', { rids: [...inflight.keys()] }).catch(() => { }); inflight.clear(); cache.clear(); active = null; $('pop').hidden = true; render(); schedule(300); }
 
 // ── 적용·무시·되돌리기 ──────────────────────────────────────────────────
@@ -270,7 +306,8 @@ function carry(lineOld, applied) {   // 고친 문단에 남은 제안을 새 �
   let ln = lineOld;
   for (const s of [...applied].sort((a, b) => b.start - a.start)) { const at = s.start - s.lineOff; ln = ln.slice(0, at) + s.n + ln.slice(at + s.o.length); }
   const keys = new Set(applied.map(s => s.o + '\u0001' + s.n));
-  if (!cache.has(ln)) cache.set(ln, { s: e.s.filter(s => !keys.has(s.o + '\u0001' + s.n) && ln.includes(s.o)).map(s => ({ ...s, at: ln.indexOf(s.o) })) });
+  const keep = arr => arr && arr.filter(s => !keys.has(s.o + '\u0001' + s.n) && ln.includes(s.o)).map(s => ({ ...s, at: ln.indexOf(s.o) }));
+  if (!cache.has(ln)) cache.set(ln, { spell: keep(e.spell), style: keep(e.style) });
   return ln;
 }
 function lineOff(i) { return lines().slice(0, i).reduce((a, l) => a + l.length + 1, 0); }
@@ -307,8 +344,8 @@ function focusSug(s, scroll) {
   if (!m) return;
   if (scroll) m.scrollIntoView({ block: 'center', behavior: 'smooth' });
   const er = $('ed').getBoundingClientRect(), r = m.getClientRects()[0], pop = $('pop');
-  pop.innerHTML = `<div>${chip(s.c)}</div><div style="margin-top:4px">` + (s.c === '사실' ? esc(s.o) : `<del>${esc(s.o)}</del> → <ins>${esc(s.n) || '(삭제)'}</ins>`) + `</div><div class="why" style="color:var(--muted);font-size:12.5px">${esc(s.r)}</div>`
-    + `<div class="bt">` + (s.c === '사실' ? `<button class="sm" data-rej>확인함</button>` : `<button class="sm primary" data-acc>적용</button><button class="sm" data-rej>무시</button>`) + `</div>`;
+  pop.innerHTML = `<div>${chip(s.c)}</div><div style="margin-top:4px">` + (s.c === '사실' && s.o === s.n ? esc(s.o) : `<del>${esc(s.o)}</del> → <ins>${esc(s.n) || '(삭제)'}</ins>`) + `</div><div class="why" style="color:var(--muted);font-size:12.5px">${esc(s.r)}</div>`
+    + `<div class="bt">` + (s.c === '사실' && s.o === s.n ? `<button class="sm" data-rej>확인함</button>` : `<button class="sm primary" data-acc>적용</button><button class="sm" data-rej>${s.c === '사실' ? '확인함' : '무시'}</button>`) + `</div>`;
   pop.hidden = false;
   pop.style.top = (r.bottom - er.top + 6) + 'px';
   pop.style.left = Math.max(8, Math.min(r.left - er.left, er.width - pop.offsetWidth - 8)) + 'px';
@@ -427,6 +464,7 @@ $('reviewbtn').onclick = async () => {
       + (j.good.length ? `<div style="margin-top:8px;font-size:13px;color:#166534">${j.good.map(g => '✓ ' + esc(g)).join('<br>')}</div>` : '')
       + j.issues.map(i => `<div class="issue" style="border-color:${COL[i.c][0]}">${chip(i.c)} <b>${esc(i.t)}</b>${i.q ? `<q title="본문에서 찾기">${esc(i.q)}</q>` : ''}<div style="color:#374151">→ ${esc(i.f)}</div></div>`).join('')
       + `<div class="hint" style="margin-top:8px">${persona.name} 기준 · ${(j.ms / 1000).toFixed(1)}초</div>`;
+    if (j.kind && persona.builtin && j.kind !== persona.name) kindHint((PERSONAS.find(p => p.name === j.kind) || {}).id);
     $('t-rev').querySelectorAll('q').forEach(q => q.onclick = () => { const a = ta.value.indexOf(q.textContent); if (a >= 0) { ta.focus(); ta.setSelectionRange(a, a + q.textContent.length); } });
   } catch (e) { $('t-rev').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`; }
   $('reviewbtn').disabled = false;

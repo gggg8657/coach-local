@@ -17,14 +17,17 @@ def fake(system, user, model=None, stop=lambda: False):
     if stop():
         raise app.Cancelled()
     if "글 전체를" in system:
-        return {"summary": "요청이 뒤에 있습니다.", "good": ["날짜 표기 정확"], "issues": [
+        return {"kind": "메시지·메일", "summary": "요청이 뒤에 있습니다.", "good": ["날짜 표기 정확"], "issues": [
             {"q": "참석 바랍니다요", "t": "요청이 끝에 묻힘", "f": "첫 항목으로", "c": "논리"},
             {"q": "본문에 없는 말", "t": "붙임 누락", "f": "붙임 표기", "c": "형식 관례"}]}
+    if "교정기" in system:  # 맞춤법 검사: 어절 단위
+        return {"s": [{"p": "p0", "o": "월요일 에", "n": "월요일에", "r": "조사는 붙여 씀"},
+                      {"p": "p0", "o": "다음주 월요일 에 할", "n": "다음 주 월요일에 할", "r": "띄어쓰기"},   # 3어절 → 조각으로 나눔
+                      {"p": "p0", "o": "없는 조각", "n": "x"}]}                                            # 문단에 없음 → 버림
     return {"s": [
-        {"p": "p0", "o": "월요일 에", "n": "월요일에", "r": "조사는 붙여 씀", "c": "맞춤법"},
+        {"p": "p0", "o": "월요일 에", "n": "월요일에", "r": "맞춤법은 맞춤법 검사 몫", "c": "맞춤법"},   # 문체 검사의 맞춤법 → 버림
         {"p": "[p0]", "o": "바랍니다요", "n": "바람", "r": "공문 종결", "c": "문체·어조"},
-        {"p": "p0", "o": "없는 조각", "n": "x", "r": "", "c": "맞춤법"},          # 문단에 없음 → 버림
-        {"p": "p0", "o": "월요일 에", "n": "월요일에", "r": "중복", "c": "맞춤법"},  # 같은 자리 중복 → 버림
+        {"p": "p0", "o": "회의는 다음주 월요일 에 할 예정임.", "n": "회의는 다음 주 월요일에 열 예정임.", "r": "x", "c": "형식"},  # 문장 대부분 → 조각, 겹치면 짧은 쪽
         {"p": "p1", "o": "12,000,000원", "n": "12,000,000원", "r": "견적서 금액과 대조", "c": "사실"},
         {"p": "p1", "o": "견적", "n": "견적", "r": "같은 말", "c": "명료"},          # 바뀐 것 없음 → 버림
         {"p": "p9", "o": "x", "n": "y", "c": "맞춤법"}]}
@@ -48,11 +51,19 @@ assert app.clean_persona({"name": "x", "rules": "a\n\n b "})["rules"] == ["a", "
 # 2) 문단 검사: 원문에 있는 조각만, 분류 정규화, 위치
 units = [{"id": "p0", "text": "회의는 다음주 월요일 에 할 예정임. 참석 바랍니다요."}, {"id": "p1", "text": "금액: 12,000,000원(견적 기준)"}]
 r = app.check(units, P, "부서장 승인 요청")
-got = [(s["p"], s["o"], s["c"]) for s in r["s"]]
-assert got == [("p0", "월요일 에", "맞춤법"), ("p0", "바랍니다요", "문체"), ("p1", "12,000,000원", "사실")], got
-assert r["dropped"] == 4, r["dropped"]
+got = [(s["p"], s["o"], s["n"], s["c"]) for s in r["s"]]
+assert got == [("p0", "다음주", "다음 주", "맞춤법"), ("p0", "월요일 에", "월요일에", "맞춤법"), ("p0", "할", "열", "형식"),
+               ("p0", "바랍니다요", "바람", "문체"), ("p1", "12,000,000원", "12,000,000원", "사실")], got
+assert r["dropped"] == 7, r["dropped"]
+assert [s["c"] for s in app.check(units, P, passes=("spell",))["s"]] == ["맞춤법"] * 2
+assert app._accept({"p": "1", "o": "가", "n": "카"}, {"p0": "x", "p1": "가 나"}, "맞춤법", [])[0]["p"] == "p1"   # "1" → p1
+_big = {"p": "p0", "o": "회의는 다음주 월요일 에 할 예정임.", "n": "회의는 다음 주 월요일에 할 예정임.", "r": "x", "c": "문체"}
+assert len(app._accept(_big, {"p0": _big["o"]}, None, [])) == 1                                        # 문체 다시 쓰기는 통째로
+assert [x["o"] for x in app._accept(_big, {"p0": _big["o"]}, None, [], minimal=True)] == ["다음주", "월요일 에"]  # 글 종류 어긋남 → 조각만
+assert app._split("가 나 다", "가 라 다") == [(2, "나", "라")] and app._split("가 나", "라 마") == []
 assert all(units[int(s["p"][1])]["text"][s["at"]:].startswith(s["o"]) for s in r["s"])
-assert "부서장 승인 요청" in SEEN[-1][0] and "[p1] 금액" in SEEN[-1][1]
+sty = [x for x in SEEN if "교정기" not in x[0]][-1]
+assert "부서장 승인 요청" in sty[0] and "[p1] 금액" in sty[1] and any("교정기" in x[0] and "공문서" in x[0] for x in SEEN)
 assert app.check([{"id": "p0", "text": "  "}], P) == {"s": [], "dropped": 0}
 try:
     app.check(units, P, stop=lambda: True); assert False
@@ -61,6 +72,7 @@ except app.Cancelled:
 
 # 3) 전체 검토: 본문에 없는 인용은 비움
 rv = app.review("회의는 월요일. 참석 바랍니다요.", P)
+assert rv["kind"] == "메시지·메일" and "메시지·메일" in SEEN[-1][0]
 assert rv["issues"][0]["q"] == "참석 바랍니다요" and rv["issues"][1]["q"] == "" and rv["issues"][1]["c"] == "형식"
 
 # 4) 문서 저장·판 기록
@@ -96,7 +108,9 @@ def call(path, body=None, user=None):
 
 
 c, b = call("/api/check", {"rid": "r1", "units": units, "persona": P, "purpose": ""})
-assert c == 200 and len(json.loads(b)["s"]) == 3 and "ms" in json.loads(b)
+assert c == 200 and len(json.loads(b)["s"]) == 5 and "ms" in json.loads(b)
+c, b = call("/api/check", {"rid": "r2", "pass": "style", "units": units, "persona": P})
+assert c == 200 and "맞춤법" not in [s["c"] for s in json.loads(b)["s"]]
 c, b = call("/api/docs", {"text": "앨리스 글"}, "alice")
 aid = json.loads(b)["id"]
 assert os.path.exists(os.path.join(TMP, "u", "alice", "docs", aid + ".json"))

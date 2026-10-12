@@ -198,39 +198,140 @@ CHECK_SYS = """너는 한국어 글쓰기 코치다. [글 종류]의 관례와 [
 [목적] {purpose}
 
 출력 JSON: {{"s":[{{"p":"문단번호","o":"원문 일부","n":"고친 말","r":"이유","c":"분류"}}]}}
-- o: 그 문단의 글자를 그대로 복사한 연속 구간(띄어쓰기·문장부호까지 같게). 고칠 곳을 포함하는 가장 짧은 구간(보통 2~15자).
-  맞춤법·띄어쓰기는 틀린 어절마다 따로 잡는다. 문장 전체를 다시 쓰는 제안은 꼭 필요할 때만 문단당 1개(맞춤법 제안과 겹쳐도 됨).
-- n: o 자리에 그대로 넣을 말. 뜻·숫자·고유명사는 바꾸지 않는다. 글에 없는 내용(관련 근거·날짜·문서번호 등)을 지어 넣거나 ○○·XX 자리표시를 쓰지 않는다 — 그런 지적은 하지 않는다.
-- r: 이유, 25자 이내.
-- c: 맞춤법(맞춤법·띄어쓰기·문장부호) | 문체(어조·높임·종결) | 형식(이 글 종류의 관례·표기) | 명료(모호·중복·장황) | 논리(연결·순서·근거) | 사실(확인할 날짜·수치·고유명사: n 은 o 와 같게, r 에 확인할 점)
-- 문단당 최대 6개, 확실한 것만. 없으면 {{"s":[]}}."""
+- 맞춤법·띄어쓰기는 다른 검사가 따로 하니 내지 않는다.
+- o: 그 문단의 글자를 그대로 복사한 연속 구간(띄어쓰기·문장부호까지 같게). 고칠 곳만 담은 가장 짧은 구간(보통 한두 어절).
+  문장을 통째로 바꾸는 제안은 문체·논리에서 꼭 필요할 때만, 문단당 1개.
+- n: o 자리에 그대로 넣을 말. 뜻·숫자·고유명사는 바꾸지 않는다. 글에 없는 내용(관련 근거·날짜·문서번호 등)을 지어 넣거나 ○○·XX 자리표시를 쓰지 않는다.
+- 글이 [글 종류]와 많이 달라 보이면(예: 공문서인데 메신저 말투) 문장 구조를 갈아엎지 말고 꼭 필요한 어휘·표기만 짚는다.
+- r: 이유, 20자 이내.
+- c: 문체(어조·높임·종결) | 형식(이 글 종류의 관례·표기) | 명료(모호·중복·장황) | 논리(연결·순서·근거) | 사실
+- 사실: 숫자·날짜·이름·인용처럼 확인할 수 있는 구체적 내용이 틀려 보이거나 서로 맞지 않을 때만(없는 날짜, 요일 불일치, 합계·인원 불일치 등). n 은 맞는 값(모르면 o 그대로), r 에 확인할 점. 막연한 의심은 내지 않는다.
+- 문단당 최대 4개, 확실한 것만. 없으면 {{"s":[]}}."""
+
+SPELL_SYS = """한국어 맞춤법·띄어쓰기 교정기. 문단마다 틀린 어절만 찾는다. 어조·어휘·문장 구조는 건드리지 않는다.
+출력 JSON: {{"s":[{{"p":"문단번호","o":"틀린 어절(문단 그대로)","n":"고친 어절","r":"15자 이내 이유"}}]}}
+- o 는 한 어절(띄어쓰기 오류면 두 어절)만. 문장 통째 금지. 틀린 곳이 없으면 {{"s":[]}}.
+- 글 종류: {kind}. 공문서·논문·보고서면 합성어 띄어쓰기 원칙도 적용(고속카메라→고속 카메라).
+자주 틀리는 예: 시일내에→시일 내에 / 할때→할 때 / 되요→돼요 / 몇일→며칠 / 않되요→안 돼요 / 어의없다→어이없다 / 학생으로써(자격)→학생으로서 / 대화로서(수단)→대화로써"""
+
+FULL_OK = ("문체", "논리")   # 문장을 크게 바꾸는 제안은 이 분류에서만
 
 
-def check(units, persona, purpose="", model=MODEL, stop=lambda: False):
-    """units = [{"id": "p3", "text": "..."}] → 자리가 확인된 제안 목록 + 버린 개수."""
+def _sentence_len(text, at, end):
+    """o 가 걸친 문장(들)의 길이 — 문장 끝(. ? ! 줄바꿈) 기준."""
+    a = max(text.rfind(ch, 0, at) for ch in ".?!\n") + 1
+    ends = [i for i in (text.find(ch, end) for ch in ".?!\n") if i >= 0]
+    return (min(ends) + 1 if ends else len(text)) - a
+
+
+def _split(o, n):
+    """글자 단위로 비교해 바뀐 곳을 어절 경계까지 넓힌 조각들 → [(o 안 위치, 원문 조각, 고친 조각)]. 통째로 바뀌었으면 []."""
+    from difflib import SequenceMatcher
+    sm, ps = SequenceMatcher(None, o, n, autojunk=False), []
+    if sm.ratio() < 0.5:  # 거의 다 바뀜 = 다시 쓰기 → 나누지 않음
+        return []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        a, b = i1, i2
+        while a > 0 and not o[a - 1].isspace():
+            a -= 1
+        while b < len(o) and not o[b].isspace():
+            b += 1
+        if ps and a <= ps[-1][1]:  # 같은 어절(또는 맞닿은 곳)이면 합침
+            ps[-1][1], ps[-1][3] = b, j2 + (b - i2)
+        else:
+            ps.append([a, b, j1 - (i1 - a), j2 + (b - i2)])
+    if not ps or (len(ps) == 1 and ps[0][0] == 0 and ps[0][1] == len(o)):
+        return []
+    return [(a, o[a:b], n[x:y].strip()) for a, b, x, y in ps]
+
+
+def _accept(raw, by, cat_default, dropped, minimal=False):
+    """LLM 이 낸 제안 하나 → 자리 확인·정리된 제안 목록(0개 이상)."""
+    if not isinstance(raw, dict):
+        dropped.append("형식")
+        return []
+    pid, o, n = str(raw.get("p", "")).strip("[] "), str(raw.get("o") or ""), str(raw.get("n") or "")
+    if pid not in by and "p" + pid in by:  # "0" 처럼 p 를 빼고 답하는 경우
+        pid = "p" + pid
+    if pid not in by and len(by) == 1:
+        pid = next(iter(by))
+    c = cat_default or next((k for k in CATS if k in str(raw.get("c", ""))), "명료")
+    r, text = str(raw.get("r") or "")[:80], by.get(pid)
+    if not cat_default and c == "맞춤법":  # 문체 검사는 맞춤법을 내지 않는다(맞춤법 검사 몫)
+        c = None
+    if not c or not text or not o or o not in text or (o == n and c != "사실") or PLACEHOLDER.search(n) or len(n) > 2 * len(o) + 20:
+        dropped.append(o)
+        return []
+    at = text.index(o)
+    big = len(o) >= 15 and len(o) > 0.6 * _sentence_len(text, at, at + len(o)) and c != "사실"
+    if big and minimal:  # 글 종류가 어긋나 보일 때: 문장 갈아엎기는 내지 않고 최소 조각만
+        parts = [x for x in _split(o, n) if x[1] != x[2]]
+        if not parts or len(parts) > 3:
+            dropped.append(o)
+            return []
+        return [{"p": pid, "o": po, "n": pn, "r": r, "c": c, "at": at + off} for off, po, pn in parts]
+    if (big and c not in FULL_OK) or (cat_default == "맞춤법" and len(o.split()) > 2):  # 크게 바꾸는 제안 → 최소 조각으로
+        parts = _split(o, n)
+        if not parts or len(parts) > 3:
+            dropped.append(o)
+            return []
+        return [{"p": pid, "o": po, "n": pn, "r": r, "c": c, "at": at + off} for off, po, pn in parts if po != pn]
+    if big and not r:
+        dropped.append(o)
+        return []
+    return [{"p": pid, "o": o, "n": n, "r": r, "c": c, "at": at}]
+
+
+def _dedupe(items):
+    """같은 문단에서 겹치면 맞춤법, 그다음 짧은 쪽을 남긴다. 단, 문체·논리의 문장 다시 쓰기는 겹쳐도 카드로 남긴다(밑줄은 짧은 쪽)."""
+    out, seen = [], set()
+    for s in sorted(items, key=lambda s: (s["c"] != "맞춤법", len(s["o"]))):   # 맞춤법(어절 단위) 먼저, 그다음 짧은 것
+        if (s["p"], s["o"], s["n"]) in seen:
+            continue
+        clash = any(t["p"] == s["p"] and s["at"] < t["at"] + len(t["o"]) and t["at"] < s["at"] + len(s["o"]) for t in out)
+        if clash and not (s["c"] in FULL_OK and len(s["o"]) >= 15):
+            continue
+        seen.add((s["p"], s["o"], s["n"]))
+        out.append(s)
+    return sorted(out, key=lambda s: (s["p"], s["at"]))
+
+
+def check(units, persona, purpose="", model=MODEL, stop=lambda: False, passes=("spell", "style"), minimal=False):
+    """units = [{"id": "p3", "text": "..."}] → 자리가 확인된 제안 목록 + 버린 개수.
+    맞춤법 검사(작은 프롬프트, 어절 단위)와 문체·형식 검사를 따로 묻는다. 화면은 맞춤법 → 문체 순으로 따로 불러 먼저 온 것부터 보이고,
+    둘 다 부르면(CLI·기본) 동시에 돌려 합친다."""
     units = [{"id": str(u["id"])[:20], "text": str(u["text"])[:3000]} for u in units if str(u.get("text", "")).strip()][:20]
     if not units:
         return {"s": [], "dropped": 0}
-    system = CHECK_SYS.format(persona=persona_text(persona), purpose=(purpose or "").strip()[:200] or "(없음)")
+    p = clean_persona(persona)
     user = "\n".join(f"[{u['id']}] {u['text']}" for u in units)
-    got = llm(system, user, model, stop).get("s") or []
-    by = {u["id"]: u["text"] for u in units}
-    out, dropped, seen = [], 0, set()
-    for s in got if isinstance(got, list) else []:
-        if not isinstance(s, dict):
-            continue
-        pid, o, n = str(s.get("p", "")).strip("[] "), str(s.get("o") or ""), str(s.get("n") or "")
-        if pid not in by and len(by) == 1:
-            pid = next(iter(by))
-        c = next((k for k in CATS if k in str(s.get("c", ""))), "명료")
-        text = by.get(pid)
-        if (not text or not o or o not in text or (o == n and c != "사실") or (pid, o) in seen
-                or PLACEHOLDER.search(n) or len(n) > 2 * len(o) + 20):  # 자리표시·내용 지어내기는 버림
-            dropped += 1
-            continue
-        seen.add((pid, o))
-        out.append({"p": pid, "o": o, "n": n, "r": str(s.get("r") or "")[:80], "c": c, "at": text.index(o)})
-    return {"s": out, "dropped": dropped}
+    jobs = {"style": (CHECK_SYS.format(persona=persona_text(p), purpose=(purpose or "").strip()[:200] or "(없음)"), None),
+            "spell": (SPELL_SYS.format(kind=p["name"]), "맞춤법")}
+    jobs = {k: v for k, v in jobs.items() if k in passes}
+    res = {}
+
+    def run(k):
+        try:
+            res[k] = llm(jobs[k][0], user, model, stop).get("s") or []
+        except Exception as e:  # noqa: BLE001 — 한쪽이 실패해도 다른 쪽 결과는 살린다
+            res[k] = e
+    ts = [threading.Thread(target=run, args=(k,)) for k in jobs]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    errs = [v for v in res.values() if isinstance(v, Exception)]
+    if any(isinstance(e, Cancelled) for e in errs):
+        raise Cancelled()
+    if len(errs) == len(jobs):
+        raise errs[0]
+    by, dropped, items = {u["id"]: u["text"] for u in units}, [], []
+    for k, got in res.items():
+        if isinstance(got, list):
+            for raw in got:
+                items += _accept(raw, by, jobs[k][1], dropped, minimal)
+    out = _dedupe(items)
+    return {"s": out, "dropped": len(dropped) + len(items) - len(out), **({"partial": str(errs[0])[:120]} if errs else {})}
 
 
 REVIEW_SYS = """너는 한국어 글쓰기 코치다. 글 전체를 [글 종류]의 관례와 [목적]에 비추어 검토한다.
@@ -238,7 +339,7 @@ REVIEW_SYS = """너는 한국어 글쓰기 코치다. 글 전체를 [글 종류]
 [목적] {purpose}
 
 문장 단위 맞춤법은 빼고, 구조·흐름·빠진 요소·목적 부합을 본다(예: 공문의 '끝.'·붙임 누락, 메일의 기한 누락, 논문의 근거 없는 주장).
-출력 JSON: {{"summary":"총평 2문장 이내","good":["잘된 점(최대 3)"],"issues":[{{"q":"관련 원문 일부(그대로 복사, 글 전체 문제면 빈 문자열)","t":"문제","f":"고칠 방향 또는 예시 문장","c":"형식|논리|명료|문체|사실"}}]}}
+출력 JSON: {{"kind":"이 글에 가장 맞는 글 종류 — {kinds} 중 하나","summary":"총평 2문장 이내","good":["잘된 점(최대 3)"],"issues":[{{"q":"관련 원문 일부(그대로 복사, 글 전체 문제면 빈 문자열)","t":"문제","f":"고칠 방향 또는 예시 문장","c":"형식|논리|명료|문체|사실"}}]}}
 issues 는 중요한 순서로 최대 7개."""
 
 
@@ -246,14 +347,15 @@ def review(text, persona, purpose="", model=MODEL):
     text = (text or "").strip()[:12000]
     if not text:
         raise ValueError("검토할 글이 없습니다")
-    j = llm(REVIEW_SYS.format(persona=persona_text(persona), purpose=(purpose or "").strip()[:200] or "(없음)"), text, model)
+    kinds = [p["name"] for p in BUILTIN]
+    j = llm(REVIEW_SYS.format(persona=persona_text(persona), purpose=(purpose or "").strip()[:200] or "(없음)", kinds="·".join(kinds)), text, model)
     issues = []
     for i in j.get("issues") or []:
         if isinstance(i, dict) and i.get("t"):
             q = str(i.get("q") or "")
             issues.append({"q": q if q and q in text else "", "t": str(i["t"])[:200], "f": str(i.get("f") or "")[:400],
                            "c": next((k for k in CATS if k in str(i.get("c", ""))), "논리")})
-    return {"summary": str(j.get("summary") or "")[:400], "good": [str(x)[:200] for x in (j.get("good") or [])][:3], "issues": issues[:7]}
+    return {"kind": next((k for k in kinds if k == str(j.get("kind") or "").strip()), ""), "summary": str(j.get("summary") or "")[:400], "good": [str(x)[:200] for x in (j.get("good") or [])][:3], "issues": issues[:7]}
 
 
 # ── 문서 저장·기록 ──────────────────────────────────────────────────────────
@@ -456,7 +558,8 @@ class H(BaseHTTPRequestHandler):
                 rid, t0 = (who, str(req.get("rid") or "")), time.time()
                 stop = lambda: rid in CANCEL or _gone(self.connection)
                 try:
-                    r = check(req.get("units") or [], req.get("persona") or BUILTIN[0], req.get("purpose") or "", req.get("model") or MODEL, stop)
+                    ps = (req["pass"],) if req.get("pass") in ("spell", "style") else ("spell", "style")
+                    r = check(req.get("units") or [], req.get("persona") or BUILTIN[0], req.get("purpose") or "", req.get("model") or MODEL, stop, ps, bool(req.get("minimal")))
                 except Cancelled:
                     return self._send({"cancelled": True}, code=499)
                 finally:
