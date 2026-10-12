@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>글쓰기 코치</title>
+<style>
+  :root{--bg:#f6f7f9;--fg:#1d1f23;--muted:#6b7280;--line:#dde1e6;--card:#fff;--acc:#2563eb;--acc2:#e8efff;--del:#fde2e2;--delf:#b42318;--ins:#dcfce7;--insf:#166534}
+  *{box-sizing:border-box}
+  body{font:14.5px/1.6 -apple-system,"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;background:var(--bg);color:var(--fg);margin:0}
+  [hidden]{display:none!important}
+  .wrap{max-width:1360px;margin:0 auto;padding:18px 16px}
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  h1{font-size:20px;margin:0}h1 small{font-weight:400;color:var(--muted);font-size:13px;margin-left:6px}
+  .priv{font-size:12px;color:#166534;background:#ecfdf3;border:1px solid #c6f0d5;border-radius:99px;padding:2px 10px}
+  .hint{font-size:12px;color:var(--muted)}
+  input,select,textarea,button{font:inherit;font-size:14px;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--fg)}
+  button{cursor:pointer;white-space:nowrap}button:hover{border-color:#b8c0cc}button:disabled{opacity:.5;cursor:default}
+  button.primary{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600}
+  button.sm{font-size:12.5px;padding:3px 9px}button.link{border:none;background:none;color:var(--acc);padding:2px 4px}
+  .bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:10px 0}
+  .bar .grow{flex:1 1 260px;min-width:0}
+  .bar label{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+  .cols{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;align-items:start}
+  @media (max-width:1000px){.cols{grid-template-columns:minmax(0,1fr)}}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+  /* 편집기: 투명 textarea 아래에 같은 글자를 그린 배경 층(밑줄·색)을 깐다 */
+  .ed{position:relative;background:#fff;border:1px solid var(--line);border-radius:10px}
+  .ed:focus-within{border-color:#9db7f5;box-shadow:0 0 0 3px #e8efff}
+  .ed .bd,.ed textarea{font:16px/1.85 "Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;padding:22px 26px;margin:0;border:0;
+    white-space:pre-wrap;overflow-wrap:break-word;word-break:keep-all;letter-spacing:0;tab-size:4}
+  .ed .bd{color:transparent;min-height:440px;pointer-events:none}
+  .ed textarea{position:absolute;inset:0;width:100%;height:100%;background:transparent;resize:none;overflow:hidden;outline:none;border-radius:10px;color:var(--fg);caret-color:var(--fg)}
+  .ed textarea::placeholder{color:#a0a6b0}
+  mark{color:transparent;border-radius:3px;border-bottom:2px solid;padding:0}
+  mark.on{outline:2px solid currentColor}
+  .stat{display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:8px 2px}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#16a34a;margin-right:5px}.dot.busy{background:#f59e0b;animation:bl 1s infinite}.dot.err{background:#dc2626}
+  @keyframes bl{50%{opacity:.3}}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:-4px -4px 10px}
+  .tabs button{border:none;border-bottom:2px solid transparent;border-radius:0;background:none;padding:6px 10px;color:var(--muted);font-weight:600}
+  .tabs button.on{color:var(--fg);border-bottom-color:var(--acc)}
+  .catrow{display:flex;align-items:center;gap:6px;font-size:13px;padding:3px 0}
+  .catrow .n{flex:1;min-width:0}.catrow b{font-weight:600}
+  .chip{display:inline-block;font-size:11.5px;border-radius:5px;padding:0 7px;font-weight:600;white-space:nowrap}
+  .cards{display:flex;flex-direction:column;gap:8px;margin-top:10px;max-height:calc(100vh - 300px);overflow:auto;padding-right:2px}
+  .card{border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fff;font-size:13.5px;cursor:pointer;overflow-wrap:anywhere}
+  .card:hover,.card.on{border-color:var(--acc);box-shadow:0 1px 6px #2563eb22}
+  .card .ch{display:flex;align-items:center;gap:6px;margin-bottom:3px}.card .ch .sp{flex:1}
+  .card .why{color:var(--muted);font-size:12.5px;margin-top:2px}
+  del{background:var(--del);color:var(--delf);text-decoration:line-through;border-radius:3px;padding:0 2px}
+  ins{background:var(--ins);color:var(--insf);text-decoration:none;border-radius:3px;padding:0 2px}
+  .empty{color:var(--muted);text-align:center;padding:30px 10px;font-size:13px}
+  .pop{position:absolute;z-index:5;width:min(340px,90%);background:#fff;border:1px solid #c8d3e6;border-radius:10px;box-shadow:0 6px 24px #0f172a26;padding:10px 12px;font-size:13.5px;overflow-wrap:anywhere}
+  .pop .bt{display:flex;gap:6px;margin-top:8px}
+  .issue{border-left:3px solid var(--line);padding:4px 0 4px 10px;margin:8px 0;font-size:13.5px;overflow-wrap:anywhere}
+  .issue q{display:block;color:var(--muted);font-size:12.5px;cursor:pointer}.issue q:hover{color:var(--acc)}
+  .modal{position:fixed;inset:0;background:#0f172a55;display:flex;align-items:flex-start;justify-content:center;z-index:20;padding:40px 12px;overflow:auto}
+  .modal>.box{background:#fff;border-radius:12px;width:min(920px,100%);padding:16px 18px;box-shadow:0 10px 40px #0003}
+  .modal h3{margin:0 0 10px;font-size:16px;display:flex;align-items:center;gap:8px}.modal h3 .sp{flex:1}
+  .pm{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px}@media (max-width:700px){.pm{grid-template-columns:minmax(0,1fr)}}
+  .plist{display:flex;flex-direction:column;gap:3px;max-height:520px;overflow:auto}
+  .plist button{text-align:left;border-color:transparent;display:flex;justify-content:space-between;gap:6px}.plist button.on{background:var(--acc2);border-color:var(--acc)}
+  .pf label{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--muted);margin-bottom:8px}
+  .pf input,.pf textarea{width:100%}.pf textarea{resize:vertical;min-height:70px;line-height:1.5}
+  .pf .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}@media (max-width:700px){.pf .row{grid-template-columns:1fr}}
+  table.docs{width:100%;border-collapse:collapse;font-size:13.5px}table.docs td{border-bottom:1px solid #eef0f3;padding:6px 4px;vertical-align:top}
+  table.docs td.t{cursor:pointer;overflow-wrap:anywhere}table.docs td.t:hover{color:var(--acc)}
+  details.menu{position:relative;display:inline-block}details.menu summary{list-style:none;cursor:pointer;font-size:14px;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:#fff}
+  details.menu summary::-webkit-details-marker{display:none}
+  details.menu>div{position:absolute;right:0;top:110%;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px #0002;z-index:6;display:flex;flex-direction:column;min-width:150px;padding:4px}
+  details.menu>div button{border:none;text-align:left}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:7px 16px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30}
+  .toast.on{opacity:.95}
+  .vers li{list-style:none;display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0}.vers{padding:0;margin:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>글쓰기 코치 <small>쓰는 동안 글 종류·목적에 맞춰 고칠 곳을 짚어 줍니다</small></h1>
+  <span class="priv" title="글은 이 서버의 로컬 LLM 으로만 처리하며 외부로 보내지 않습니다. 문서·페르소나는 사용자별로 따로 저장됩니다.">🔒 로컬 LLM · 외부 전송 없음</span>
+  <span class="hint" id="modelinfo"></span>
+</header>
+
+<div class="bar">
+  <label>글 종류 <select id="persona"></select></label>
+  <button id="pmgr" title="페르소나 보기·만들기·고치기">페르소나 관리</button>
+  <input id="purpose" class="grow" placeholder="목적 한 줄 — 예) 부서장에게 고속 카메라 구매 승인 요청">
+</div>
+<div class="bar">
+  <input id="title" class="grow" placeholder="제목 (비우면 첫 줄)" style="flex-basis:200px">
+  <button id="new">새 글</button>
+  <button id="docsbtn">문서함</button>
+  <button id="importbtn">불러오기</button><input type="file" id="file" hidden>
+  <button id="save">저장</button>
+  <details class="menu" id="exp"><summary>내보내기 ▾</summary><div>
+    <button data-x="txt">텍스트 (.txt)</button><button data-x="md">마크다운 (.md)</button><button data-x="docx">워드 (.docx)</button></div></details>
+  <button id="copy">복사</button>
+  <button id="reviewbtn" class="primary">전체 검토</button>
+</div>
+
+<div class="cols">
+  <div>
+    <div class="ed" id="ed">
+      <div class="bd" id="bd"></div>
+      <textarea id="ta" spellcheck="false" placeholder="여기에 글을 쓰세요. 잠깐 멈추면(약 1초) 바뀐 문단만 다시 읽고 고칠 곳을 표시합니다.&#10;&#10;밑줄 친 곳을 누르면 제안이 뜹니다."></textarea>
+      <div class="pop" id="pop" hidden></div>
+    </div>
+    <div class="stat">
+      <span><span class="dot" id="dot"></span><span id="st">준비</span></span>
+      <span id="lat"></span><span id="cnt"></span><span id="saved"></span>
+      <span style="flex:1"></span>
+      <button class="sm" id="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>
+      <button class="sm" id="recheck" title="모든 문단을 다시 검사">다시 검사</button>
+      <label class="hint">모델 <select id="model" style="font-size:12.5px;padding:2px 6px"></select></label>
+    </div>
+  </div>
+
+  <div class="panel" id="side">
+    <div class="tabs" id="stabs"><button data-t="sug" class="on">제안 <span id="nsug"></span></button><button data-t="rev">전체 검토</button><button data-t="ver">판 기록</button></div>
+    <div id="t-sug">
+      <div id="cats"></div>
+      <div class="cards" id="cards"></div>
+    </div>
+    <div id="t-rev" hidden><div class="empty">위의 <b>전체 검토</b>를 누르면 구조·흐름·빠진 요소를 짚어 줍니다.</div></div>
+    <div id="t-ver" hidden></div>
+  </div>
+</div>
+</div>
+
+<div class="modal" id="m-persona" hidden><div class="box">
+  <h3>페르소나 — 글 종류·형식 코치 <span class="sp"></span><button id="pnew" class="sm">+ 새로 만들기</button><button class="sm" data-close>닫기</button></h3>
+  <div class="pm">
+    <div class="plist" id="plist"></div>
+    <div class="pf">
+      <div class="tabs" id="pftabs" style="margin:0 0 10px"><button data-t="form" class="on">양식</button><button data-t="json">JSON</button></div>
+      <div id="pf-form">
+        <div class="row"><label>이름<input id="f-name" maxlength="30"></label><label>대상 독자<input id="f-audience"></label></div>
+        <label>어조<input id="f-tone"></label>
+        <div class="row"><label>형식 규칙 (한 줄에 하나)<textarea id="f-rules" rows="6"></textarea></label><label>금지·주의 (한 줄에 하나)<textarea id="f-avoid" rows="6"></textarea></label></div>
+        <label>예시 글<textarea id="f-example" rows="4"></textarea></label>
+      </div>
+      <div id="pf-json" hidden><textarea id="f-json" rows="18" style="width:100%;font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace"></textarea></div>
+      <div class="bar"><button id="psave" class="primary">저장</button><button id="pdup">복제</button><button id="pdel">삭제</button><button id="puse">이 페르소나로 쓰기</button><span class="hint" id="pmsg"></span></div>
+    </div>
+  </div>
+</div></div>
+
+<div class="modal" id="m-docs" hidden><div class="box">
+  <h3>문서함 <span class="hint">이 접속자의 문서만 보입니다</span><span class="sp"></span><button class="sm" data-close>닫기</button></h3>
+  <table class="docs" id="doclist"></table>
+</div></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const MODEL_DEFAULT = %MODEL%, CATS = %CATS%;
+const COL = { 맞춤법: ['#dc2626', '#fde8e8'], 문체: ['#7c3aed', '#efe7ff'], 형식: ['#2563eb', '#e3edff'], 명료: ['#b45309', '#fff0d1'], 논리: ['#0f766e', '#d6f5ee'], 사실: ['#be185d', '#fde7f1'] };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const chip = c => `<span class="chip" style="color:${COL[c][0]};background:${COL[c][1]}">${CATS[c]}</span>`;
+const ls = { get: k => { try { return localStorage.getItem('coach.' + k) } catch (e) { return null } }, set: (k, v) => { try { localStorage.setItem('coach.' + k, v) } catch (e) { } } };
+function toast(t) { const e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('on'), 1800); }
+async function api(p, body) {
+  const r = await fetch('api/' + p, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json(); if (j.error) throw new Error(j.error); return j;
+}
+
+// ── 상태 ────────────────────────────────────────────────────────────────
+const ta = $('ta'), bd = $('bd');
+let PERSONAS = [], persona = null, doc = { id: '', versions: 0 };
+const cache = new Map();        // 문단 글자 그대로 → {s:[제안]} : 같은 문단은 다시 묻지 않음, 되돌리면 제안도 돌아옴
+const ignored = new Set();      // 무시한 제안 (원문\u0001제안)
+const inflight = new Map();     // 요청 id → {lines:Set, ctrl}
+let SUGS = [], active = null, timer = null, lastInput = 0, lats = [];
+
+// ── 문단 → 제안 위치 계산 · 배경 층 그리기 ────────────────────────────────
+function lines() { return ta.value.split('\n'); }
+function compute() {
+  const out = []; let off = 0;
+  lines().forEach((ln, i) => {
+    const e = cache.get(ln), taken = [];
+    // 겹치는 제안(맞춤법 + 문장 다시 쓰기)은 짧은 쪽에 밑줄, 긴 쪽은 카드에만
+    if (e) for (const s of [...e.s].sort((a, b) => a.o.length - b.o.length)) {
+      if (ignored.has(s.o + '\u0001' + s.n)) continue;
+      const at = ln.substr(s.at, s.o.length) === s.o ? s.at : ln.indexOf(s.o);
+      if (at < 0) continue;
+      const nomark = taken.some(([a, b]) => at < b && at + s.o.length > a);
+      if (!nomark) taken.push([at, at + s.o.length]);
+      out.push({ ...s, nomark, line: i, start: off + at, end: off + at + s.o.length, k: `${s.c}|${s.o}|${s.n}|${off + at}` });
+    }
+    off += ln.length + 1;
+  });
+  return out.sort((a, b) => a.start - b.start);
+}
+function render() {
+  SUGS = compute();
+  const t = ta.value; let h = '', p = 0;
+  for (const s of SUGS.filter(s => !s.nomark)) {
+    h += esc(t.slice(p, s.start)) + `<mark data-k="${esc(s.k)}" class="${active === s.k ? 'on' : ''}" style="background:${COL[s.c][1]};border-color:${COL[s.c][0]};color:transparent;outline-color:${COL[s.c][0]}">${esc(t.slice(s.start, s.end))}</mark>`;
+    p = s.end;
+  }
+  bd.innerHTML = h + esc(t.slice(p)) + '\n​';
+  $('nsug').textContent = SUGS.length || '';
+  $('cnt').textContent = `${t.replace(/\s/g, '').length.toLocaleString()}자`;
+  // 분류별 요약 + 카드
+  const by = {}; SUGS.forEach(s => (by[s.c] = by[s.c] || []).push(s));
+  $('cats').innerHTML = Object.keys(CATS).filter(c => by[c]).map(c => `<div class="catrow">${chip(c)}<span class="n"><b>${by[c].length}</b>건</span>`
+    + (c === '사실' ? '' : `<button class="sm" data-all="${c}">모두 적용</button>`) + `<button class="sm" data-none="${c}">모두 무시</button></div>`).join('');
+  $('cards').innerHTML = SUGS.length ? SUGS.map(s => `<div class="card ${active === s.k ? 'on' : ''}" data-k="${esc(s.k)}"><div class="ch">${chip(s.c)}<span class="sp"></span>`
+    + (s.c === '사실' ? `<button class="sm" data-ok>확인함</button>` : `<button class="sm primary" data-acc>적용</button><button class="sm" data-rej>무시</button>`) + `</div>`
+    + (s.c === '사실' ? `<span>${esc(s.o)}</span>` : `<del>${esc(s.o)}</del> → <ins>${esc(s.n) || '(삭제)'}</ins>`) + `<div class="why">${esc(s.r)}${s.nomark ? ' · 밑줄은 겹친 다른 제안에' : ''}</div></div>`).join('')
+    : `<div class="empty">${ta.value.trim() ? (inflight.size || lines().some(l => l.trim().length >= 2 && !cache.has(l)) ? '읽는 중…' : '지금은 고칠 곳이 없습니다 ✓') : '글을 쓰기 시작하면 여기에 제안이 쌓입니다.'}</div>`;
+  if (active && !SUGS.some(s => s.k === active)) { active = null; $('pop').hidden = true; }
+}
+function status() {
+  const n = [...inflight.values()].reduce((a, r) => a + r.lines.size, 0);
+  $('dot').className = 'dot' + (n ? ' busy' : status.err ? ' err' : '');
+  $('st').textContent = n ? `읽는 중 · 문단 ${n}개` : status.err ? '오류: ' + status.err : (ta.value.trim() ? '최신' : '준비');
+  if (lats.length) { const l = lats.slice(-10); $('lat').textContent = `응답 ${(l[l.length - 1] / 1000).toFixed(1)}초 (최근 평균 ${(l.reduce((a, b) => a + b, 0) / l.length / 1000).toFixed(1)}초)`; }
+}
+
+// ── 검사 일정: 멈춘 뒤 1.2초, 바뀐 문단만, 지난 요청은 취소 ───────────────────
+const MAXPAR = 2;
+function schedule(ms = 1200) { clearTimeout(timer); timer = setTimeout(pump, ms); }
+function pump() {
+  const cur = new Set(lines().filter(l => l.trim().length >= 2));
+  const stale = [];
+  for (const [rid, r] of inflight) if (![...r.lines].some(l => cur.has(l))) { r.ctrl.abort(); inflight.delete(rid); stale.push(rid); }
+  if (stale.length) api('cancel', { rids: stale }).catch(() => { });
+  const busy = new Set([...inflight.values()].flatMap(r => [...r.lines]));
+  let todo = [...cur].filter(l => !cache.has(l) && !busy.has(l));
+  // 쓰고 있는 문단 먼저
+  const caretLine = ta.value.slice(0, ta.selectionStart).split('\n').length - 1, cl = lines()[caretLine];
+  todo.sort((a, b) => (b === cl) - (a === cl));
+  if (todo[0] === cl && inflight.size < MAXPAR) send([todo.shift()]);   // 지금 쓰는 문단은 혼자 → 가장 빨리
+  while (todo.length && inflight.size < MAXPAR) {
+    const per = Math.max(1, Math.min(5, Math.ceil(todo.length / (MAXPAR - inflight.size)))), batch = []; let size = 0;
+    while (todo.length && batch.length < per && (size + todo[0].length < 700 || !batch.length)) { size += todo[0].length; batch.push(todo.shift()); }
+    send(batch);
+  }
+  status();
+}
+function send(batch) {
+  const rid = Math.random().toString(36).slice(2, 10), ctrl = new AbortController(), t0 = performance.now(), typed = lastInput;
+  inflight.set(rid, { lines: new Set(batch), ctrl });
+  fetch('api/check', { method: 'POST', signal: ctrl.signal, headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rid, units: batch.map((t, i) => ({ id: 'p' + i, text: t })), persona, purpose: $('purpose').value, model: $('model').value || MODEL_DEFAULT }) })
+    .then(r => r.json()).then(j => {
+      if (!inflight.has(rid)) return;
+      if (j.error) throw new Error(j.error);
+      if (j.cancelled) return;
+      batch.forEach((t, i) => cache.set(t, { s: j.s.filter(s => s.p === 'p' + i) }));
+      lats.push(performance.now() - t0); status.err = '';
+      console.debug('check', batch.length, 'units', Math.round(performance.now() - t0), 'ms, since pause', Math.round(performance.now() - typed), 'ms, dropped', j.dropped);
+    })
+    .catch(e => { if (e.name !== 'AbortError') { status.err = e.message.slice(0, 80); batch.forEach(t => cache.set(t, { s: [], err: 1 })); } })
+    .finally(() => { inflight.delete(rid); render(); status(); if (inflight.size < MAXPAR) pump(); });
+}
+function resetChecks() { for (const r of inflight.values()) r.ctrl.abort(); if (inflight.size) api('cancel', { rids: [...inflight.keys()] }).catch(() => { }); inflight.clear(); cache.clear(); active = null; $('pop').hidden = true; render(); schedule(300); }
+
+// ── 적용·무시·되돌리기 ──────────────────────────────────────────────────
+function replaceRange(a, b, txt) {   // execCommand 로 바꿔야 브라우저의 Ctrl+Z 기록에 남는다
+  ta.focus(); ta.setSelectionRange(a, b);
+  if (!document.execCommand('insertText', false, txt)) { ta.setRangeText(txt, a, b, 'end'); ta.dispatchEvent(new Event('input')); }
+}
+function carry(lineOld, applied) {   // 고친 문단에 남은 제안을 새 문단 글자에 옮겨 둔다 → 적용해도 다시 묻지 않음
+  const e = cache.get(lineOld); if (!e) return lineOld;
+  let ln = lineOld;
+  for (const s of [...applied].sort((a, b) => b.start - a.start)) { const at = s.start - s.lineOff; ln = ln.slice(0, at) + s.n + ln.slice(at + s.o.length); }
+  const keys = new Set(applied.map(s => s.o + '\u0001' + s.n));
+  if (!cache.has(ln)) cache.set(ln, { s: e.s.filter(s => !keys.has(s.o + '\u0001' + s.n) && ln.includes(s.o)).map(s => ({ ...s, at: ln.indexOf(s.o) })) });
+  return ln;
+}
+function lineOff(i) { return lines().slice(0, i).reduce((a, l) => a + l.length + 1, 0); }
+function accept(list) {
+  let end = -1; list = [...list].sort((a, b) => a.start - b.start).filter(s => s.start >= end && (end = s.end, true));
+  if (!list.length) return;
+  const L = lines(), byLine = {};
+  list.forEach(s => (byLine[s.line] = byLine[s.line] || []).push({ ...s, lineOff: lineOff(s.line) }));
+  if (list.length === 1) { const s = list[0]; carry(L[s.line], byLine[s.line]); replaceRange(s.start, s.end, s.n); }
+  else { for (const i in byLine) L[i] = carry(L[i], byLine[i]); replaceRange(0, ta.value.length, L.join('\n')); }
+  active = null; $('pop').hidden = true; toast(list.length > 1 ? `${list.length}곳 적용 — 되돌리기는 Ctrl+Z` : '적용했습니다');
+}
+function reject(list) { list.forEach(s => ignored.add(s.o + '\u0001' + s.n)); active = null; $('pop').hidden = true; render(); }
+const byK = k => SUGS.find(s => s.k === k);
+$('cards').onclick = e => {
+  const c = e.target.closest('.card'); if (!c) return; const s = byK(c.dataset.k); if (!s) return;
+  if (e.target.matches('[data-acc]')) return accept([s]);
+  if (e.target.matches('[data-rej],[data-ok]')) return reject([s]);
+  focusSug(s, true);
+};
+$('cards').onmouseover = e => { const c = e.target.closest('.card'); bd.querySelectorAll('mark').forEach(m => m.classList.toggle('on', !!c && m.dataset.k === c.dataset.k || m.dataset.k === active)); };
+$('cats').onclick = e => {
+  const a = e.target.dataset.all, n = e.target.dataset.none;
+  if (a) accept(SUGS.filter(s => s.c === a)); if (n) reject(SUGS.filter(s => s.c === n));
+};
+$('undo').onclick = () => { ta.focus(); document.execCommand('undo'); };
+$('recheck').onclick = resetChecks;
+
+// 밑줄 누르면 그 자리에 제안 상자
+function focusSug(s, scroll) {
+  active = s.k; render();
+  const m = [...bd.querySelectorAll('mark')].find(m => m.dataset.k === s.k), card = [...$('cards').children].find(c => c.dataset.k === s.k);
+  if (card) card.scrollIntoView({ block: 'nearest' });
+  if (!m) return;
+  if (scroll) m.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const er = $('ed').getBoundingClientRect(), r = m.getClientRects()[0], pop = $('pop');
+  pop.innerHTML = `<div>${chip(s.c)}</div><div style="margin-top:4px">` + (s.c === '사실' ? esc(s.o) : `<del>${esc(s.o)}</del> → <ins>${esc(s.n) || '(삭제)'}</ins>`) + `</div><div class="why" style="color:var(--muted);font-size:12.5px">${esc(s.r)}</div>`
+    + `<div class="bt">` + (s.c === '사실' ? `<button class="sm" data-rej>확인함</button>` : `<button class="sm primary" data-acc>적용</button><button class="sm" data-rej>무시</button>`) + `</div>`;
+  pop.hidden = false;
+  pop.style.top = (r.bottom - er.top + 6) + 'px';
+  pop.style.left = Math.max(8, Math.min(r.left - er.left, er.width - pop.offsetWidth - 8)) + 'px';
+}
+$('pop').onclick = e => { const s = byK(active); if (!s) return; if (e.target.matches('[data-acc]')) accept([s]); else if (e.target.matches('[data-rej]')) reject([s]); };
+function atCaret() {
+  const p = ta.selectionStart; if (ta.selectionEnd !== p) return;
+  const s = SUGS.find(s => p >= s.start && p <= s.end);
+  if (s) { if (s.k !== active) focusSug(s); } else if (active) { active = null; $('pop').hidden = true; render(); }
+}
+ta.addEventListener('click', atCaret);
+ta.addEventListener('keyup', e => { if (e.key.startsWith('Arrow')) atCaret(); if (e.key === 'Escape') { active = null; $('pop').hidden = true; render(); } });
+ta.addEventListener('scroll', () => { ta.scrollTop = 0; });
+ta.addEventListener('input', () => { lastInput = performance.now(); $('pop').hidden = true; active = null; render(); status(); schedule(); autosave(); });
+document.addEventListener('mousedown', e => { if (!e.target.closest('#pop,#ta,.card')) $('pop').hidden = true; if (!e.target.closest('details.menu')) $('exp').open = false; });
+
+// ── 페르소나 ───────────────────────────────────────────────────────────
+async function loadPersonas(pick) {
+  PERSONAS = await api('personas');
+  const want = pick || ls.get('persona') || 'gongmun';
+  $('persona').innerHTML = `<optgroup label="기본">${PERSONAS.filter(p => p.builtin).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</optgroup>`
+    + (PERSONAS.some(p => !p.builtin) ? `<optgroup label="내 페르소나">${PERSONAS.filter(p => !p.builtin).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</optgroup>` : '');
+  $('persona').value = PERSONAS.some(p => p.id === want) ? want : 'gongmun';
+  persona = PERSONAS.find(p => p.id === $('persona').value);
+}
+$('persona').onchange = () => { persona = PERSONAS.find(p => p.id === $('persona').value); ls.set('persona', persona.id); toast(`글 종류: ${persona.name} — 다시 읽습니다`); resetChecks(); autosave(); };
+let ptimer; $('purpose').oninput = () => { ls.set('purpose', $('purpose').value); clearTimeout(ptimer); ptimer = setTimeout(() => { resetChecks(); autosave(); }, 1500); };
+
+let pedit = null;
+const pform = p => { $('f-name').value = p.name || ''; $('f-audience').value = p.audience || ''; $('f-tone').value = p.tone || ''; $('f-rules').value = (p.rules || []).join('\n'); $('f-avoid').value = (p.avoid || []).join('\n'); $('f-example').value = p.example || ''; $('f-json').value = JSON.stringify(strip(p), null, 1); };
+const strip = p => ({ name: p.name, audience: p.audience, tone: p.tone, rules: p.rules, avoid: p.avoid, example: p.example });
+const fromForm = () => $('pf-json').hidden ? { name: $('f-name').value, audience: $('f-audience').value, tone: $('f-tone').value, rules: $('f-rules').value.split('\n'), avoid: $('f-avoid').value.split('\n'), example: $('f-example').value } : JSON.parse($('f-json').value);
+function plist() {
+  $('plist').innerHTML = PERSONAS.map(p => `<button data-id="${p.id}" class="${pedit && pedit.id === p.id ? 'on' : ''}"><span>${esc(p.name)}</span><span class="hint">${p.builtin ? '기본' : '내 것'}</span></button>`).join('')
+    + (pedit && !pedit.id ? `<button class="on"><span>${esc(pedit.name || '(새 페르소나)')}</span><span class="hint">새로</span></button>` : '');
+}
+function pselect(p) {
+  pedit = p; plist(); pform(p);
+  const ro = !!p.builtin;
+  document.querySelectorAll('.pf input,.pf textarea').forEach(x => x.readOnly = ro);
+  $('psave').hidden = ro; $('pdel').hidden = ro || !p.id; $('puse').hidden = !p.id;
+  $('pmsg').textContent = ro ? '기본 페르소나는 고칠 수 없습니다 — 복제해서 내 것으로 만드세요.' : '';
+}
+$('pmgr').onclick = () => { $('m-persona').hidden = false; pselect(persona); };
+$('plist').onclick = e => { const b = e.target.closest('button[data-id]'); if (b) pselect(PERSONAS.find(p => p.id === b.dataset.id)); };
+$('pnew').onclick = () => pselect({ id: '', name: '', audience: '', tone: '', rules: [], avoid: [], example: '' });
+$('pdup').onclick = () => { let p; try { p = fromForm(); } catch (e) { return $('pmsg').textContent = 'JSON 오류: ' + e.message; } pselect({ ...p, id: '', builtin: false, name: (p.name || '') + ' (사본)' }); $('pmsg').textContent = '사본입니다 — 고친 뒤 저장하세요.'; };
+$('psave').onclick = async () => {
+  try { const p = await api('personas', { ...fromForm(), id: pedit.id }); await loadPersonas($('persona').value); pselect(PERSONAS.find(x => x.id === p.id)); $('pmsg').textContent = '저장했습니다'; if (persona.id === p.id) { persona = p; resetChecks(); } }
+  catch (e) { $('pmsg').textContent = '오류: ' + e.message; }
+};
+$('pdel').onclick = async () => { if (!pedit.id || !confirm(`'${pedit.name}' 페르소나를 지울까요?`)) return; await api('personas/delete', { id: pedit.id }); await loadPersonas(); pselect(persona); };
+$('puse').onclick = () => { $('persona').value = pedit.id; $('persona').onchange(); $('m-persona').hidden = true; };
+$('pftabs').onclick = e => {
+  const t = e.target.dataset.t; if (!t) return;
+  try { if (t === 'json') $('f-json').value = JSON.stringify(strip(fromForm()), null, 1); else pform({ ...pedit, ...JSON.parse($('f-json').value) }); }
+  catch (er) { return $('pmsg').textContent = 'JSON 오류: ' + er.message; }
+  $('pftabs').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.t === t)); $('pf-form').hidden = t !== 'form'; $('pf-json').hidden = t !== 'json';
+};
+document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('.modal').hidden = true);
+document.querySelectorAll('.modal').forEach(m => m.onclick = e => { if (e.target === m) m.hidden = true; });
+
+// ── 문서: 자동 저장 · 문서함 · 판 기록 ─────────────────────────────────────
+let stimer;
+function autosave(snapshot) {
+  clearTimeout(stimer);
+  if (!ta.value.trim()) return;
+  stimer = setTimeout(async () => {
+    try {
+      const j = await api('docs', { id: doc.id, title: $('title').value, text: ta.value, persona: persona && persona.id, purpose: $('purpose').value, snapshot: !!snapshot });
+      doc = j; ls.set('doc', j.id); $('saved').textContent = `저장됨 ${j.updated.slice(11, 16)}`;
+      if (snapshot) toast(`저장했습니다 (판 ${j.versions})`);
+      if (!$('t-ver').hidden) versions();
+    } catch (e) { $('saved').textContent = '저장 실패: ' + e.message; }
+  }, snapshot ? 0 : 3000);
+}
+$('title').oninput = () => autosave();
+$('save').onclick = () => { if (!ta.value.trim()) return toast('저장할 글이 없습니다'); autosave(true); };
+function clearReview() { $('t-rev').innerHTML = '<div class="empty">위의 <b>전체 검토</b>를 누르면 구조·흐름·빠진 요소를 짚어 줍니다.</div>'; tab('sug'); }
+function setText(t) { clearReview(); ta.value = t; active = null; $('pop').hidden = true; render(); schedule(300); }
+async function openDoc(id) {
+  const j = await api('docs/' + id);
+  doc = { id: j.id, versions: (j.versions || []).length }; ls.set('doc', j.id);
+  $('title').value = j.title || ''; $('purpose').value = j.purpose || '';
+  if (j.persona && PERSONAS.some(p => p.id === j.persona)) { $('persona').value = j.persona; persona = PERSONAS.find(p => p.id === j.persona); }
+  cache.clear(); setText(j.text || ''); $('saved').textContent = `불러옴 ${j.updated.slice(5, 16).replace('T', ' ')}`;
+  return j;
+}
+$('new').onclick = () => { doc = { id: '', versions: 0 }; ls.set('doc', ''); $('title').value = ''; setText(''); $('saved').textContent = ''; ta.focus(); };
+$('docsbtn').onclick = async () => {
+  const ds = await api('docs');
+  $('doclist').innerHTML = ds.length ? '<tr class="hint"><td>제목</td><td>종류</td><td>고친 때</td><td>글자</td><td></td></tr>' + ds.map(d => `<tr><td class="t" data-id="${d.id}">${esc(d.title)}</td><td>${esc((PERSONAS.find(p => p.id === d.persona) || {}).name || '')}</td><td class="hint">${d.updated.slice(0, 16).replace('T', ' ')}</td><td class="hint">${d.chars}</td><td><button class="sm" data-del="${d.id}">삭제</button></td></tr>`).join('')
+    : '<tr><td class="empty">저장한 문서가 없습니다. 글을 쓰면 3초 뒤 자동 저장됩니다.</td></tr>';
+  $('m-docs').hidden = false;
+};
+$('doclist').onclick = async e => {
+  if (e.target.dataset.id) { await openDoc(e.target.dataset.id); $('m-docs').hidden = true; }
+  if (e.target.dataset.del && confirm('이 문서를 지울까요?')) { await api('docs/delete', { id: e.target.dataset.del }); if (doc.id === e.target.dataset.del) doc = { id: '' }; $('docsbtn').onclick(); }
+};
+async function versions() {
+  if (!doc.id) return $('t-ver').innerHTML = '<div class="empty">아직 저장하지 않은 글입니다.</div>';
+  const j = await api('docs/' + doc.id), vs = (j.versions || []).slice().reverse();
+  $('t-ver').innerHTML = '<div class="hint">저장 버튼을 누르거나 10분마다 판이 남습니다(최대 30).</div><ul class="vers">' + vs.map((v, i) => `<li><span style="flex:1">${v.ts.slice(5, 16).replace('T', ' ')} · ${v.text.replace(/\s/g, '').length}자</span><button class="sm" data-v="${vs.length - 1 - i}">이 판으로</button></li>`).join('') + '</ul>';
+  $('t-ver').querySelectorAll('[data-v]').forEach(b => b.onclick = () => { replaceRange(0, ta.value.length, j.versions[b.dataset.v].text); toast('그 판으로 되돌렸습니다 — Ctrl+Z 로 취소'); });
+}
+$('stabs').onclick = e => { const t = e.target.closest('button'); if (!t) return; $('stabs').querySelectorAll('button').forEach(b => b.classList.toggle('on', b === t)); ['sug', 'rev', 'ver'].forEach(x => $('t-' + x).hidden = x !== t.dataset.t); if (t.dataset.t === 'ver') versions(); };
+const tab = t => $('stabs').querySelector(`[data-t="${t}"]`).click();
+
+// ── 전체 검토 ────────────────────────────────────────────────────────────
+$('reviewbtn').onclick = async () => {
+  if (!ta.value.trim()) return toast('검토할 글이 없습니다');
+  tab('rev'); $('t-rev').innerHTML = '<div class="empty">글 전체를 읽는 중… (보통 5~15초)</div>'; $('reviewbtn').disabled = true;
+  try {
+    const j = await api('review', { text: ta.value, persona, purpose: $('purpose').value, model: $('model').value || MODEL_DEFAULT });
+    $('t-rev').innerHTML = `<div style="font-size:13.5px"><b>총평</b> ${esc(j.summary)}</div>`
+      + (j.good.length ? `<div style="margin-top:8px;font-size:13px;color:#166534">${j.good.map(g => '✓ ' + esc(g)).join('<br>')}</div>` : '')
+      + j.issues.map(i => `<div class="issue" style="border-color:${COL[i.c][0]}">${chip(i.c)} <b>${esc(i.t)}</b>${i.q ? `<q title="본문에서 찾기">${esc(i.q)}</q>` : ''}<div style="color:#374151">→ ${esc(i.f)}</div></div>`).join('')
+      + `<div class="hint" style="margin-top:8px">${persona.name} 기준 · ${(j.ms / 1000).toFixed(1)}초</div>`;
+    $('t-rev').querySelectorAll('q').forEach(q => q.onclick = () => { const a = ta.value.indexOf(q.textContent); if (a >= 0) { ta.focus(); ta.setSelectionRange(a, a + q.textContent.length); } });
+  } catch (e) { $('t-rev').innerHTML = `<div class="empty">오류: ${esc(e.message)}</div>`; }
+  $('reviewbtn').disabled = false;
+};
+
+// ── 불러오기 · 내보내기 · 복사 ─────────────────────────────────────────────
+fetch('api/import_ok').then(r => r.json()).then(j => $('file').accept = '.txt,.md,.docx' + (j.kordoc ? ',.hwp,.hwpx,.pdf' : '')).catch(() => { });
+$('importbtn').onclick = () => $('file').click();
+$('file').onchange = async () => {
+  const f = $('file').files[0]; if (!f) return; $('file').value = '';
+  if (ta.value.trim() && !confirm('지금 글을 불러온 글로 바꿀까요? (지금 글은 저장돼 있습니다)')) return;
+  toast('불러오는 중…');
+  try {
+    const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(f); });
+    const j = await api('import', { file_name: f.name, file_b64: b64 });
+    doc = { id: '', versions: 0 }; $('title').value = f.name.replace(/\.[^.]+$/, ''); setText(j.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()); autosave(true);
+  } catch (e) { toast('불러오기 실패: ' + e.message); }
+};
+function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+const fname = () => ($('title').value.trim() || ta.value.trim().split('\n')[0].slice(0, 30) || '글').replace(/[\\/:*?"<>|]/g, '_');
+$('exp').onclick = async e => {
+  const x = e.target.dataset.x; if (!x) return; $('exp').open = false;
+  if (x === 'docx') {
+    const r = await fetch('api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: $('title').value.trim(), text: ta.value }) });
+    return download(await r.blob(), fname() + '.docx');
+  }
+  const t = x === 'md' && $('title').value.trim() ? `# ${$('title').value.trim()}\n\n${ta.value}` : ta.value;
+  download(new Blob([t], { type: 'text/plain;charset=utf-8' }), fname() + '.' + x);
+};
+$('copy').onclick = () => { navigator.clipboard.writeText(ta.value).then(() => toast('복사했습니다'), () => { ta.select(); document.execCommand('copy'); toast('복사했습니다'); }); };
+
+// ── 시작 ──────────────────────────────────────────────────────────────────
+fetch('api/models').then(r => r.json()).then(ms => { $('model').innerHTML = ms.map(m => `<option ${m === MODEL_DEFAULT ? 'selected' : ''}>${esc(m)}</option>`).join(''); $('modelinfo').textContent = MODEL_DEFAULT; })
+  .catch(() => { status.err = 'LLM 서버에 연결할 수 없습니다'; status(); });
+(async () => {
+  await loadPersonas();
+  $('purpose').value = ls.get('purpose') || '';
+  const last = ls.get('doc');
+  if (last) { try { await openDoc(last); } catch (e) { ls.set('doc', ''); } }
+  render(); status();
+})();
+</script>
+</body>
+</html>
