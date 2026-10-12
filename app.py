@@ -790,7 +790,7 @@ def signed(html):
         html = html.replace("<head>", "<head>" + meta, 1) if "<head>" in html else meta + html
     if "data-sig" not in html:
         tag = (f'<!-- {_SIG} --><div data-sig title="{mail}" style="text-align:center;font-size:11px;color:#9aa0a6;'
-               f'opacity:.55;margin:28px 0 8px">{name}</div>')
+               f'opacity:.55;margin:28px 0 8px">{name} · 내부 시험용 · 배포용 아님</div>')
         html = html.replace("</body>", tag + "</body>", 1) if "</body>" in html else html + tag
     return html
 
