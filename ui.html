@@ -173,9 +173,10 @@
 <script>
 const $ = id => document.getElementById(id);
 const MODEL_DEFAULT = %MODEL%, CATS = %CATS%;
-const COL = { 맞춤법: ['#dc2626', '#fde8e8'], 문체: ['#7c3aed', '#efe7ff'], 형식: ['#2563eb', '#e3edff'], 명료: ['#b45309', '#fff0d1'], 논리: ['#0f766e', '#d6f5ee'], 사실: ['#be185d', '#fde7f1'] };
+// [밑줄·테두리 색, 배경, 글자 색(분류 칩 — 배경 위 4.5:1 이상, 없으면 첫 색)]
+const COL = { 맞춤법: ['#dc2626', '#fde8e8', '#b91c1c'], 문체: ['#7c3aed', '#efe7ff'], 형식: ['#2563eb', '#e3edff', '#1d4ed8'], 명료: ['#b45309', '#fff0d1', '#92400e'], 논리: ['#0f766e', '#d6f5ee'], 사실: ['#be185d', '#fde7f1'] };
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const chip = c => `<span class="chip" style="color:${COL[c][0]};background:${COL[c][1]}">${CATS[c]}</span>`;
+const chip = c => `<span class="chip" style="color:${COL[c][2] || COL[c][0]};background:${COL[c][1]}">${CATS[c]}</span>`;
 const ls = { get: k => { try { return localStorage.getItem('coach.' + k) } catch (e) { return null } }, set: (k, v) => { try { localStorage.setItem('coach.' + k, v) } catch (e) { } } };
 function toast(t) { const e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('on'), 1800); }
 async function api(p, body) {
