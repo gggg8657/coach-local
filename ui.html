@@ -74,6 +74,12 @@
   .toast.on{opacity:.95}
   .kindbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fff8e6;border:1px solid #f3d99b;color:#7a5200;border-radius:9px;padding:7px 12px;margin-bottom:8px;font-size:13.5px}
   .kindbar span{flex:1;min-width:0}
+  .prof{border:1px solid #e3e7ee;border-radius:9px;padding:7px 10px;margin:-4px -4px 10px;background:#fafbfd;font-size:13px}
+  .prof summary{cursor:pointer;overflow-wrap:anywhere}.prof[open] summary{margin-bottom:8px}
+  .prow{display:grid;grid-template-columns:64px minmax(0,1fr);gap:6px;align-items:start;margin:5px 0;overflow-wrap:anywhere}.prow>b{font-weight:600;color:#475569;font-size:12.5px;padding-top:2px}
+  .prow select,.prow input{font-size:13px;padding:3px 7px}
+  .pchip{display:inline-block;background:#eef2f7;border-radius:5px;padding:0 7px;margin:0 4px 4px 0;font-size:12.5px}.pchip.warn{background:#fff1d6;color:#8a5a00}
+  .pchip [data-term]{cursor:pointer}.noteo{background:#f3f4f6;border-radius:3px;padding:0 3px}
   .vers li{list-style:none;display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0}.vers{padding:0;margin:0}
 </style>
 </head>
@@ -121,6 +127,13 @@
   </div>
 
   <div class="panel" id="side">
+    <details class="prof" id="prof"><summary><b>글 파악</b> <span class="hint" id="profsum">글을 쓰면 문체·용어·요청을 파악합니다</span></summary>
+      <div class="prow"><b>문체</b><div><select id="pf-style"><option value="">자동</option><option>개조식</option><option>합니다체</option><option>해요체</option><option>~다체</option></select>
+        <span class="hint">정하면 그 종결로 맞춤</span></div></div>
+      <div class="prow"><b>고정 표기</b><div><input id="pf-terms" placeholder="쉼표로 — 예) 고속 카메라, 시험동" style="width:100%"></div></div>
+      <div id="pf-dyn"></div>
+      <div class="hint" style="display:flex;gap:6px;align-items:center;margin-top:6px"><span id="pf-when" style="flex:1"></span><button class="sm" id="pf-re">다시 파악</button></div>
+    </details>
     <div class="tabs" id="stabs"><button data-t="sug" class="on">제안 <span id="nsug"></span></button><button data-t="rev">전체 검토</button><button data-t="ver">판 기록</button></div>
     <div id="t-sug">
       <div id="cats"></div>
@@ -173,27 +186,35 @@ async function api(p, body) {
 // ── 상태 ────────────────────────────────────────────────────────────────
 const ta = $('ta'), bd = $('bd');
 let PERSONAS = [], persona = null, doc = { id: '', versions: 0 };
-const cache = new Map();        // 문단 글자 그대로 → {spell:[…], style:[…]} : 같은 문단은 다시 묻지 않음, 되돌리면 제안도 돌아옴
+// 같은 문단은 다시 묻지 않음(되돌리면 제안도 돌아옴). 맞춤법은 문단 글자만으로, 문체·형식은 문단 + 바로 앞 문단으로 기억한다
+// → 앞 문단을 고치면 다음 문단의 문체·형식(접속어·반복 등)도 다시 본다.
+const spellC = new Map(), styleC = new Map();
+let RULES = [];                 // 규칙 검사(용어·약어·지시어·날짜·합계·되풀이·문체 섞임) — LLM 없이, 글이 바뀔 때마다 새로
 const PASSES = ['spell', 'style'];   // 맞춤법(작고 빠름) 먼저, 문체·형식은 다음
-const sugsOf = e => e ? [...(e.spell || []), ...(e.style || [])] : [];
-const checked = l => { const e = cache.get(l); return !!e && PASSES.every(p => e[p]); };
+const prevOf = (L, i) => { for (let j = i - 1; j >= 0; j--) if (L[j].trim()) return L[j]; return ''; };
+const skey = (L, i) => L[i] + '\u0002' + prevOf(L, i);
+const lineSugs = (L, i) => [...(spellC.get(L[i]) || []), ...(styleC.get(skey(L, i)) || []), ...RULES.filter(r => r.i === i && r.line === L[i])];
+const allChecked = () => { const L = lines(); return L.every((l, i) => l.trim().length < 2 || spellC.has(l) && styleC.has(skey(L, i))); };
+function clearCaches() { spellC.clear(); styleC.clear(); RULES = []; }
 const ignored = new Set();      // 무시한 제안 (원문\u0001제안)
-const inflight = new Map();     // 요청 id → {lines:Set, ctrl}
+const inflight = new Map();     // 요청 id → {keys:Set, ctrl, pass, n}
 let SUGS = [], active = null, timer = null, lastInput = 0, lats = [];
 
 // ── 문단 → 제안 위치 계산 · 배경 층 그리기 ────────────────────────────────
 function lines() { return ta.value.split('\n'); }
 function compute() {
   const out = []; let off = 0;
-  lines().forEach((ln, i) => {
+  const L = lines();
+  L.forEach((ln, i) => {
     const taken = [];
-    // 두 검사의 제안이 겹치면 맞춤법, 그다음 짧은 쪽만 남긴다. 문체·논리의 문장 다시 쓰기만 카드로 남김(밑줄은 짧은 쪽)
-    for (const s of sugsOf(cache.get(ln)).sort((a, b) => (b.c === '맞춤법') - (a.c === '맞춤법') || a.o.length - b.o.length)) {
-      if (ignored.has(s.o + '\u0001' + s.n)) continue;
+    // 겹치면 규칙 검사의 수정 → 맞춤법 → 짧은 쪽만 밑줄. 문체·논리의 문장 다시 쓰기와 규칙 검사의 메모는 카드로 남김
+    const rank = s => s.src === 'rule' && s.o !== s.n ? 0 : s.c === '맞춤법' ? 1 : s.o !== s.n ? 2 : 3;
+    for (const s of lineSugs(L, i).sort((a, b) => rank(a) - rank(b) || a.o.length - b.o.length)) {
+      if (ignored.has(s.o + '\u0001' + s.n) || out.some(x => x.line === i && x.o === s.o && x.n === s.n)) continue;
       const at = ln.substr(s.at, s.o.length) === s.o ? s.at : ln.indexOf(s.o);
       if (at < 0) continue;
       const nomark = taken.some(([a, b]) => at < b && at + s.o.length > a);
-      if (nomark && !((s.c === '문체' || s.c === '논리') && s.o.length >= 15)) continue;
+      if (nomark && !((s.c === '문체' || s.c === '논리') && s.o.length >= 15 || s.src === 'rule')) continue;
       if (!nomark) taken.push([at, at + s.o.length]);
       out.push({ ...s, nomark, line: i, start: off + at, end: off + at + s.o.length, k: `${s.c}|${s.o}|${s.n}|${off + at}` });
     }
@@ -214,15 +235,15 @@ function render() {
   // 분류별 요약 + 카드
   const by = {}; SUGS.forEach(s => (by[s.c] = by[s.c] || []).push(s));
   $('cats').innerHTML = Object.keys(CATS).filter(c => by[c]).map(c => `<div class="catrow">${chip(c)}<span class="n"><b>${by[c].length}</b>건</span>`
-    + (c === '사실' ? '' : `<button class="sm" data-all="${c}">모두 적용</button>`) + `<button class="sm" data-none="${c}">모두 무시</button></div>`).join('');
+    + (by[c].every(s => s.o === s.n) ? '' : `<button class="sm" data-all="${c}">모두 적용</button>`) + `<button class="sm" data-none="${c}">모두 무시</button></div>`).join('');
   $('cards').innerHTML = SUGS.length ? SUGS.map(s => `<div class="card ${active === s.k ? 'on' : ''}" data-k="${esc(s.k)}"><div class="ch">${chip(s.c)}<span class="sp"></span>`
-    + (s.c === '사실' && s.o === s.n ? `<button class="sm" data-ok>확인함</button>` : `<button class="sm primary" data-acc>적용</button><button class="sm" data-rej>${s.c === '사실' ? '확인함' : '무시'}</button>`) + `</div>`
-    + (s.c === '사실' && s.o === s.n ? `<span>${esc(s.o)}</span>` : `<del>${esc(s.o)}</del> → <ins>${esc(s.n) || '(삭제)'}</ins>`) + `<div class="why">${esc(s.r)}${s.nomark ? ' · 밑줄은 겹친 다른 제안에' : ''}</div></div>`).join('')
-    : `<div class="empty">${ta.value.trim() ? (inflight.size || lines().some(l => l.trim().length >= 2 && !checked(l)) ? '읽는 중…' : '지금은 고칠 곳이 없습니다 ✓') : '글을 쓰기 시작하면 여기에 제안이 쌓입니다.'}</div>`;
+    + (s.o === s.n ? `<button class="sm" data-ok>확인함</button>` : `<button class="sm primary" data-acc>적용</button><button class="sm" data-rej>${s.c === '사실' ? '확인함' : '무시'}</button>`) + `</div>`
+    + (s.o === s.n ? `<span class="noteo">${esc(s.o)}</span>` : `<del>${esc(s.o)}</del> → <ins>${esc(s.n) || '(삭제)'}</ins>`) + `<div class="why">${esc(s.r)}${s.nomark ? ' · 밑줄은 겹친 다른 제안에' : ''}</div></div>`).join('')
+    : `<div class="empty">${ta.value.trim() ? (inflight.size || !allChecked() ? '읽는 중…' : '지금은 고칠 곳이 없습니다 ✓') : '글을 쓰기 시작하면 여기에 제안이 쌓입니다.'}</div>`;
   if (active && !SUGS.some(s => s.k === active)) { active = null; $('pop').hidden = true; }
 }
 function status() {
-  const n = [...inflight.values()].reduce((a, r) => a + r.lines.size, 0);
+  const n = [...inflight.values()].reduce((a, r) => a + r.n, 0);
   $('dot').className = 'dot' + (n ? ' busy' : status.err ? ' err' : '');
   $('st').textContent = n ? `읽는 중 · 문단 ${n}개` : status.err ? '오류: ' + status.err : (ta.value.trim() ? '최신' : '준비');
   if (lats.length) { const l = lats.slice(-10); $('lat').textContent = `응답 ${(l[l.length - 1] / 1000).toFixed(1)}초 (최근 평균 ${(l.reduce((a, b) => a + b, 0) / l.length / 1000).toFixed(1)}초)`; }
@@ -233,39 +254,101 @@ function status() {
 function schedule(ms = 800) { clearTimeout(timer); timer = setTimeout(pump, ms); }
 function pump() {
   kindHint();
-  const cur = new Set(lines().filter(l => l.trim().length >= 2));
-  const stale = [];
-  for (const [rid, r] of inflight) if (![...r.lines].some(l => cur.has(l))) { r.ctrl.abort(); inflight.delete(rid); stale.push(rid); }
+  const L = lines(), idx = L.map((_, i) => i).filter(i => L[i].trim().length >= 2);
+  const now = new Set(idx.flatMap(i => [L[i], skey(L, i)])), stale = [];
+  for (const [rid, r] of inflight) if (![...r.keys].some(k => now.has(k))) { r.ctrl.abort(); inflight.delete(rid); stale.push(rid); }
   if (stale.length) api('cancel', { rids: stale }).catch(() => { });
-  const caretLine = ta.value.slice(0, ta.selectionStart).split('\n').length - 1, cl = lines()[caretLine];
-  const busy = p => new Set([...inflight.values()].filter(r => r.pass === p).flatMap(r => [...r.lines]));
-  const need = p => { const b = busy(p); return [...cur].filter(l => !(cache.get(l) || {})[p] && !b.has(l)); };
-  const caretBusy = [...inflight.values()].some(r => r.lines.has(cl));
-  for (const p of PASSES) if (!caretBusy && need(p).includes(cl) && inflight.size < 2) { send([cl], p); break; }   // 지금 쓰는 문단 먼저
+  rules();
+  const caret = ta.value.slice(0, ta.selectionStart).split('\n').length - 1;
+  const busy = new Set([...inflight.values()].flatMap(r => [...r.keys]));
+  const key = (p, i) => p === 'spell' ? L[i] : skey(L, i), store = p => p === 'spell' ? spellC : styleC;
+  const need = p => idx.filter(i => !store(p).has(key(p, i)) && !busy.has(key(p, i)));
+  const caretBusy = PASSES.some(p => busy.has(key(p, caret)));
+  for (const p of PASSES) if (!caretBusy && need(p).includes(caret) && inflight.size < 2) { send([caret], p); break; }   // 지금 쓰는 문단 먼저
   for (const p of PASSES) {
     if (inflight.size) break;
-    const todo = need(p).filter(l => l !== cl), batch = []; let size = 0;
-    while (todo.length && batch.length < 6 && (size + todo[0].length < 900 || !batch.length)) { size += todo[0].length; batch.push(todo.shift()); }
+    const todo = need(p).filter(i => i !== caret), batch = []; let size = 0;
+    while (todo.length && batch.length < 6 && (size + L[todo[0]].length < 900 || !batch.length)) { size += L[todo[0]].length; batch.push(todo.shift()); }
     if (batch.length) send(batch, p);
   }
+  if (!inflight.size) maybeProfile();
   status();
 }
-function send(batch, pass) {
-  const rid = Math.random().toString(36).slice(2, 10), ctrl = new AbortController(), t0 = performance.now(), typed = lastInput;
-  inflight.set(rid, { lines: new Set(batch), ctrl, pass });
-  fetch('api/check', { method: 'POST', signal: ctrl.signal, headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rid, pass, minimal: !$('kindbar').hidden, units: batch.map((t, i) => ({ id: 'p' + i, text: t })), persona, purpose: $('purpose').value, model: $('model').value || MODEL_DEFAULT }) })
+const profPayload = () => ({ llm: PROF.llm || {}, user: USERP });
+function checkBody(pass, idx, extra) {
+  return { pass, idx, text: ta.value, title: $('title').value, profile: profPayload(), persona, purpose: $('purpose').value, model: $('model').value || MODEL_DEFAULT, ...extra };
+}
+function send(idx, pass) {
+  const rid = Math.random().toString(36).slice(2, 10), ctrl = new AbortController(), t0 = performance.now(), typed = lastInput, L = lines();
+  const keys = idx.map(i => pass === 'spell' ? L[i] : skey(L, i)), store = pass === 'spell' ? spellC : styleC;
+  inflight.set(rid, { keys: new Set(keys), ctrl, pass, n: idx.length });
+  fetch('api/check', { method: 'POST', signal: ctrl.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(checkBody(pass, idx, { rid, minimal: !$('kindbar').hidden })) })
     .then(r => r.json()).then(j => {
       if (!inflight.has(rid)) return;
       if (j.error) throw new Error(j.error);
       if (j.cancelled) return;
-      batch.forEach((t, i) => cache.set(t, { ...(cache.get(t) || {}), [pass]: j.s.filter(s => s.p === 'p' + i) }));
+      idx.forEach((i, k) => store.set(keys[k], j.s.filter(s => s.i === i)));
       lats.push(performance.now() - t0); status.err = '';
-      console.debug('check', pass, batch.length, 'units', Math.round(performance.now() - t0), 'ms, since pause', Math.round(performance.now() - typed), 'ms, dropped', j.dropped);
+      console.debug('check', pass, idx.length, 'units', Math.round(performance.now() - t0), 'ms, since pause', Math.round(performance.now() - typed), 'ms, dropped', j.dropped);
     })
-    .catch(e => { if (e.name !== 'AbortError') { status.err = e.message.slice(0, 80); batch.forEach(t => cache.set(t, { ...(cache.get(t) || {}), [pass]: [], err: 1 })); } })
+    .catch(e => { if (e.name !== 'AbortError') { status.err = e.message.slice(0, 80); keys.forEach(k => store.set(k, [])); } })
     .finally(() => { inflight.delete(rid); render(); status(); pump(); });
 }
+// 규칙 검사: 글 전체를 보고 LLM 없이 바로(수십 ms). 늦게 온 응답은 버린다
+let ruleSeq = 0;
+function rules() {
+  const seq = ++ruleSeq, L = lines(), idx = L.map((_, i) => i).filter(i => L[i].trim().length >= 2);
+  if (!idx.length) { RULES = []; return; }
+  api('check', checkBody('rules', idx)).then(j => {
+    if (seq !== ruleSeq) return;
+    RULES = j.s.map(s => ({ ...s, line: L[s.i] })); PROF.heur = j.profile; renderProf(); render();
+  }).catch(() => { });
+}
+
+// ── 글 파악: 규칙(매번) + LLM(글이 20% 넘게 바뀌었거나 1분 넘게 고쳤을 때, 검사 요청이 없을 때만) ──
+const PROF = { heur: null, llm: null, llmText: null, llmAt: 0 };
+let USERP = { style: '', terms: '' }, profBusy = false;
+function changedRatio(a, b) { const A = new Set(a.split('\n')); return b.split('\n').filter(l => !A.has(l)).reduce((s, l) => s + l.length, 0) / Math.max(1, b.length); }
+// 검사와 GPU 를 다투지 않게: 3초 넘게 손을 뗐고 검사가 다 끝났을 때만. 다시 쓰기 시작하면 취소하고 나중에 다시
+let profTimer, profCtl = null;
+function maybeProfile(force) {
+  clearTimeout(profTimer);
+  if (!force) { profTimer = setTimeout(() => runProfile(false), Math.max(0, 3000 - (performance.now() - lastInput))); return; }
+  runProfile(true);
+}
+function runProfile(force) {
+  const t = ta.value;
+  if (profBusy || !force && (inflight.size || performance.now() - lastInput < 2900 || t.trim().length < 80
+      || PROF.llmText !== null && changedRatio(PROF.llmText, t) < 0.2 && !(Date.now() - PROF.llmAt > 60000 && t !== PROF.llmText))) return;
+  profBusy = true; $('pf-when').textContent = '파악 중…';
+  const rid = 'pf' + Math.random().toString(36).slice(2, 8); profCtl = { ctrl: new AbortController(), rid };
+  fetch('api/profile', { method: 'POST', signal: profCtl.ctrl.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rid, text: t, llm: true, model: $('model').value || MODEL_DEFAULT }) })
+    .then(r => r.json()).then(j => { if (j.error) throw new Error(j.error); if (j.cancelled || !j.llm) return; PROF.llm = j.llm; PROF.llmText = t; PROF.llmAt = Date.now(); PROF.heur = j; renderProf(); })
+    .catch(e => { if (e.name !== 'AbortError') $('pf-when').textContent = '파악 실패: ' + e.message.slice(0, 60); })
+    .finally(() => { profBusy = false; profCtl = null; if (!PROF.llmAt) $('pf-when').textContent = ''; });
+}
+function cancelProfile() { if (!profCtl) return; profCtl.ctrl.abort(); api('cancel', { rids: [profCtl.rid] }).catch(() => { }); }
+const STYLES = ['개조식', '합니다체', '해요체', '~다체'];
+function renderProf() {
+  const h = PROF.heur || {}, l = PROF.llm || {}, auto = (STYLES.includes(h.style) ? h.style : '') || l.style || h.style || '';   // 문장 끝 세기가 뚜렷하면 그것 먼저
+  const style = USERP.style || auto;
+  $('profsum').textContent = [style && style + (USERP.style ? '(지정)' : ''), l.ask && '요청: ' + (l.ask.length > 28 ? l.ask.slice(0, 28) + '…' : l.ask)].filter(Boolean).join(' · ') || (ta.value.trim() ? '읽는 중…' : '글을 쓰면 문체·용어·요청을 파악합니다');
+  $('pf-style').options[0].textContent = '자동' + (auto ? ` — ${auto}` : '');
+  const cnt = Object.entries(h.styles || {}).map(([k, v]) => `${k} ${v}`).join(' · ');
+  const chips = (arr, f = x => esc(x)) => arr && arr.length ? arr.map(x => `<span class="pchip">${f(x)}</span>`).join('') : '<span class="hint">—</span>';
+  $('pf-dyn').innerHTML =
+    `<div class="hint" style="margin:-4px 0 6px">${cnt ? '문장 끝: ' + esc(cnt) : ''}</div>`
+    + `<div class="prow"><b>용어</b><div>${chips(l.terms, t => `<span data-term="${esc(t)}" title="눌러서 고정 표기로">${esc(t)}</span>`)}`
+    + (h.variants || []).map(v => `<span class="pchip warn" title="한 글 안에서 두 가지로 씀 — 먼저 쓴 꼴 또는 고정 표기 기준으로 맞추라고 제안합니다">${esc(v.spaced)} / ${esc(v.joined)} 섞임</span>`).join('') + `</div></div>`
+    + `<div class="prow"><b>인물·기관</b><div>${chips(l.entities)}</div></div>`
+    + `<div class="prow"><b>숫자·날짜</b><div>${chips((h.numbers || []).slice(0, 8))}</div></div>`
+    + ((h.abbr || []).length ? `<div class="prow"><b>약어</b><div>${(h.abbr || []).map(a => `<span class="pchip ${a.def ? '' : 'warn'}" title="${a.def ? '첫 등장에 풀이 있음' : '첫 등장에 풀이 없음'}">${esc(a.a)} ${a.def ? '✓' : '!'}</span>`).join('')}</div></div>` : '')
+    + `<div class="prow"><b>요청·주장</b><div>${esc(l.ask || '—')}</div></div>`
+    + `<div class="prow"><b>지금까지</b><div>${esc(l.summary || '—')}</div></div>`;
+  $('pf-when').textContent = PROF.llmAt ? `LLM 파악 ${new Date(PROF.llmAt).toTimeString().slice(0, 5)} · 글이 20% 넘게 바뀌거나 1분마다 새로` : '';
+}
+function setUserProf(p) { USERP = { style: p && p.style || '', terms: p && p.terms || '' }; $('pf-style').value = USERP.style; $('pf-terms').value = USERP.terms; renderProf(); }
+
 // ── 글 종류 어긋남 안내: 문장 끝 모양으로 싸게 짐작(+전체 검토의 판단). 줄마다 갈아엎는 대신 한 번만 묻는다 ──
 const kindNo = new Set();   // '그대로 두기' 누른 (문서, 페르소나, 제안)
 function guessKind(t) {
@@ -294,20 +377,21 @@ function kindHint(want) {
   };
 }
 
-function resetChecks() { for (const r of inflight.values()) r.ctrl.abort(); if (inflight.size) api('cancel', { rids: [...inflight.keys()] }).catch(() => { }); inflight.clear(); cache.clear(); active = null; $('pop').hidden = true; render(); schedule(300); }
+function resetChecks() { for (const r of inflight.values()) r.ctrl.abort(); if (inflight.size) api('cancel', { rids: [...inflight.keys()] }).catch(() => { }); inflight.clear(); clearCaches(); active = null; $('pop').hidden = true; render(); schedule(300); }
 
 // ── 적용·무시·되돌리기 ──────────────────────────────────────────────────
 function replaceRange(a, b, txt) {   // execCommand 로 바꿔야 브라우저의 Ctrl+Z 기록에 남는다
   ta.focus(); ta.setSelectionRange(a, b);
   if (!document.execCommand('insertText', false, txt)) { ta.setRangeText(txt, a, b, 'end'); ta.dispatchEvent(new Event('input')); }
 }
-function carry(lineOld, applied) {   // 고친 문단에 남은 제안을 새 문단 글자에 옮겨 둔다 → 적용해도 다시 묻지 않음
-  const e = cache.get(lineOld); if (!e) return lineOld;
-  let ln = lineOld;
+function carry(L, i, applied) {   // 고친 문단에 남은 제안을 새 문단 글자에 옮겨 둔다 → 적용해도 다시 묻지 않음
+  const lineOld = L[i]; let ln = lineOld;
   for (const s of [...applied].sort((a, b) => b.start - a.start)) { const at = s.start - s.lineOff; ln = ln.slice(0, at) + s.n + ln.slice(at + s.o.length); }
   const keys = new Set(applied.map(s => s.o + '\u0001' + s.n));
   const keep = arr => arr && arr.filter(s => !keys.has(s.o + '\u0001' + s.n) && ln.includes(s.o)).map(s => ({ ...s, at: ln.indexOf(s.o) }));
-  if (!cache.has(ln)) cache.set(ln, { spell: keep(e.spell), style: keep(e.style) });
+  const sp = spellC.get(lineOld), st = styleC.get(skey(L, i)), nk = ln + '\u0002' + prevOf(L, i);
+  if (sp && !spellC.has(ln)) spellC.set(ln, keep(sp));
+  if (st && !styleC.has(nk)) styleC.set(nk, keep(st));
   return ln;
 }
 function lineOff(i) { return lines().slice(0, i).reduce((a, l) => a + l.length + 1, 0); }
@@ -316,8 +400,8 @@ function accept(list) {
   if (!list.length) return;
   const L = lines(), byLine = {};
   list.forEach(s => (byLine[s.line] = byLine[s.line] || []).push({ ...s, lineOff: lineOff(s.line) }));
-  if (list.length === 1) { const s = list[0]; carry(L[s.line], byLine[s.line]); replaceRange(s.start, s.end, s.n); }
-  else { for (const i in byLine) L[i] = carry(L[i], byLine[i]); replaceRange(0, ta.value.length, L.join('\n')); }
+  if (list.length === 1) { const s = list[0]; carry(L, s.line, byLine[s.line]); replaceRange(s.start, s.end, s.n); }
+  else { const L2 = [...L]; for (const i in byLine) L2[i] = carry(L, +i, byLine[i]); replaceRange(0, ta.value.length, L2.join('\n')); }
   active = null; $('pop').hidden = true; toast(list.length > 1 ? `${list.length}곳 적용 — 되돌리기는 Ctrl+Z` : '적용했습니다');
 }
 function reject(list) { list.forEach(s => ignored.add(s.o + '\u0001' + s.n)); active = null; $('pop').hidden = true; render(); }
@@ -331,7 +415,7 @@ $('cards').onclick = e => {
 $('cards').onmouseover = e => { const c = e.target.closest('.card'); bd.querySelectorAll('mark').forEach(m => m.classList.toggle('on', !!c && m.dataset.k === c.dataset.k || m.dataset.k === active)); };
 $('cats').onclick = e => {
   const a = e.target.dataset.all, n = e.target.dataset.none;
-  if (a) accept(SUGS.filter(s => s.c === a)); if (n) reject(SUGS.filter(s => s.c === n));
+  if (a) accept(SUGS.filter(s => s.c === a && s.o !== s.n)); if (n) reject(SUGS.filter(s => s.c === n));
 };
 $('undo').onclick = () => { ta.focus(); document.execCommand('undo'); };
 $('recheck').onclick = resetChecks;
@@ -344,8 +428,8 @@ function focusSug(s, scroll) {
   if (!m) return;
   if (scroll) m.scrollIntoView({ block: 'center', behavior: 'smooth' });
   const er = $('ed').getBoundingClientRect(), r = m.getClientRects()[0], pop = $('pop');
-  pop.innerHTML = `<div>${chip(s.c)}</div><div style="margin-top:4px">` + (s.c === '사실' && s.o === s.n ? esc(s.o) : `<del>${esc(s.o)}</del> → <ins>${esc(s.n) || '(삭제)'}</ins>`) + `</div><div class="why" style="color:var(--muted);font-size:12.5px">${esc(s.r)}</div>`
-    + `<div class="bt">` + (s.c === '사실' && s.o === s.n ? `<button class="sm" data-rej>확인함</button>` : `<button class="sm primary" data-acc>적용</button><button class="sm" data-rej>${s.c === '사실' ? '확인함' : '무시'}</button>`) + `</div>`;
+  pop.innerHTML = `<div>${chip(s.c)}</div><div style="margin-top:4px">` + (s.o === s.n ? esc(s.o) : `<del>${esc(s.o)}</del> → <ins>${esc(s.n) || '(삭제)'}</ins>`) + `</div><div class="why" style="color:var(--muted);font-size:12.5px">${esc(s.r)}</div>`
+    + `<div class="bt">` + (s.o === s.n ? `<button class="sm" data-rej>확인함</button>` : `<button class="sm primary" data-acc>적용</button><button class="sm" data-rej>${s.c === '사실' ? '확인함' : '무시'}</button>`) + `</div>`;
   pop.hidden = false;
   pop.style.top = (r.bottom - er.top + 6) + 'px';
   pop.style.left = Math.max(8, Math.min(r.left - er.left, er.width - pop.offsetWidth - 8)) + 'px';
@@ -359,8 +443,14 @@ function atCaret() {
 ta.addEventListener('click', atCaret);
 ta.addEventListener('keyup', e => { if (e.key.startsWith('Arrow')) atCaret(); if (e.key === 'Escape') { active = null; $('pop').hidden = true; render(); } });
 ta.addEventListener('scroll', () => { ta.scrollTop = 0; });
-ta.addEventListener('input', () => { lastInput = performance.now(); $('pop').hidden = true; active = null; render(); status(); schedule(); autosave(); });
+ta.addEventListener('input', () => { lastInput = performance.now(); cancelProfile(); $('pop').hidden = true; active = null; render(); status(); schedule(); autosave(); });
 document.addEventListener('mousedown', e => { if (!e.target.closest('#pop,#ta,.card')) $('pop').hidden = true; if (!e.target.closest('details.menu')) $('exp').open = false; });
+
+let pftimer;
+$('pf-style').onchange = () => { USERP.style = $('pf-style').value; renderProf(); autosave(); resetChecks(); };
+$('pf-terms').oninput = () => { clearTimeout(pftimer); pftimer = setTimeout(() => { USERP.terms = $('pf-terms').value; autosave(); resetChecks(); }, 1000); };
+$('pf-dyn').onclick = e => { const t = e.target.dataset.term; if (!t) return; const cur = $('pf-terms').value.split(',').map(x => x.trim()).filter(Boolean); if (!cur.includes(t)) { $('pf-terms').value = [...cur, t].join(', '); $('pf-terms').oninput(); } };
+$('pf-re').onclick = () => maybeProfile(true);
 
 // ── 페르소나 ───────────────────────────────────────────────────────────
 async function loadPersonas(pick) {
@@ -415,7 +505,7 @@ function autosave(snapshot) {
   if (!ta.value.trim()) return;
   stimer = setTimeout(async () => {
     try {
-      const j = await api('docs', { id: doc.id, title: $('title').value, text: ta.value, persona: persona && persona.id, purpose: $('purpose').value, snapshot: !!snapshot });
+      const j = await api('docs', { id: doc.id, title: $('title').value, text: ta.value, persona: persona && persona.id, purpose: $('purpose').value, profile_user: USERP, snapshot: !!snapshot });
       doc = j; ls.set('doc', j.id); $('saved').textContent = `저장됨 ${j.updated.slice(11, 16)}`;
       if (snapshot) toast(`저장했습니다 (판 ${j.versions})`);
       if (!$('t-ver').hidden) versions();
@@ -431,10 +521,10 @@ async function openDoc(id) {
   doc = { id: j.id, versions: (j.versions || []).length }; ls.set('doc', j.id);
   $('title').value = j.title || ''; $('purpose').value = j.purpose || '';
   if (j.persona && PERSONAS.some(p => p.id === j.persona)) { $('persona').value = j.persona; persona = PERSONAS.find(p => p.id === j.persona); }
-  cache.clear(); setText(j.text || ''); $('saved').textContent = `불러옴 ${j.updated.slice(5, 16).replace('T', ' ')}`;
+  clearCaches(); setUserProf(j.profile_user); PROF.llm = null; PROF.llmText = null; setText(j.text || ''); setTimeout(() => maybeProfile(true), 2500); $('saved').textContent = `불러옴 ${j.updated.slice(5, 16).replace('T', ' ')}`;
   return j;
 }
-$('new').onclick = () => { doc = { id: '', versions: 0 }; ls.set('doc', ''); $('title').value = ''; setText(''); $('saved').textContent = ''; ta.focus(); };
+$('new').onclick = () => { doc = { id: '', versions: 0 }; ls.set('doc', ''); $('title').value = ''; setUserProf(null); PROF.llm = null; PROF.llmText = null; PROF.llmAt = 0; PROF.heur = null; setText(''); $('saved').textContent = ''; ta.focus(); };
 $('docsbtn').onclick = async () => {
   const ds = await api('docs');
   $('doclist').innerHTML = ds.length ? '<tr class="hint"><td>제목</td><td>종류</td><td>고친 때</td><td>글자</td><td></td></tr>' + ds.map(d => `<tr><td class="t" data-id="${d.id}">${esc(d.title)}</td><td>${esc((PERSONAS.find(p => p.id === d.persona) || {}).name || '')}</td><td class="hint">${d.updated.slice(0, 16).replace('T', ' ')}</td><td class="hint">${d.chars}</td><td><button class="sm" data-del="${d.id}">삭제</button></td></tr>`).join('')
@@ -480,7 +570,7 @@ $('file').onchange = async () => {
   try {
     const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(f); });
     const j = await api('import', { file_name: f.name, file_b64: b64 });
-    doc = { id: '', versions: 0 }; $('title').value = f.name.replace(/\.[^.]+$/, ''); setText(j.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()); autosave(true);
+    doc = { id: '', versions: 0 }; setUserProf(null); PROF.llm = null; PROF.llmText = null; $('title').value = f.name.replace(/\.[^.]+$/, ''); setText(j.text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()); autosave(true);
   } catch (e) { toast('불러오기 실패: ' + e.message); }
 };
 function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }

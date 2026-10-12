@@ -52,23 +52,45 @@ assert app.clean_persona({"name": "x", "rules": "a\n\n b "})["rules"] == ["a", "
 units = [{"id": "p0", "text": "회의는 다음주 월요일 에 할 예정임. 참석 바랍니다요."}, {"id": "p1", "text": "금액: 12,000,000원(견적 기준)"}]
 r = app.check(units, P, "부서장 승인 요청")
 got = [(s["p"], s["o"], s["n"], s["c"]) for s in r["s"]]
-assert got == [("p0", "다음주", "다음 주", "맞춤법"), ("p0", "월요일 에", "월요일에", "맞춤법"), ("p0", "할", "열", "형식"),
+assert got == [("p0", "다음주", "다음 주", "맞춤법"), ("p0", "월요일 에", "월요일에", "맞춤법"),   # 형식 다시 쓰기는 구절로 줄였지만 맞춤법과 겹쳐 빠짐
                ("p0", "바랍니다요", "바람", "문체"), ("p1", "12,000,000원", "12,000,000원", "사실")], got
-assert r["dropped"] == 7, r["dropped"]
+assert r["dropped"] == 6, r["dropped"]
 assert [s["c"] for s in app.check(units, P, passes=("spell",))["s"]] == ["맞춤법"] * 2
 assert app._accept({"p": "1", "o": "가", "n": "카"}, {"p0": "x", "p1": "가 나"}, "맞춤법", [])[0]["p"] == "p1"   # "1" → p1
 _big = {"p": "p0", "o": "회의는 다음주 월요일 에 할 예정임.", "n": "회의는 다음 주 월요일에 할 예정임.", "r": "x", "c": "문체"}
 assert len(app._accept(_big, {"p0": _big["o"]}, None, [])) == 1                                        # 문체 다시 쓰기는 통째로
-assert [x["o"] for x in app._accept(_big, {"p0": _big["o"]}, None, [], minimal=True)] == ["다음주", "월요일 에"]  # 글 종류 어긋남 → 조각만
+assert [x["o"] for x in app._accept(_big, {"p0": _big["o"]}, None, [], minimal=True)] == ["다음주 월요일 에"]  # 글 종류 어긋남 → 조각만
 assert app._split("가 나 다", "가 라 다") == [(2, "나", "라")] and app._split("가 나", "라 마") == []
+assert app._split("1. 상기 건에 대하여 협조", "1. 위 호와 관련하여 협조") == [(3, "상기 건에 대하여", "위 호와 관련하여")]       # 이웃 어절은 구절로
+assert app._split("다음주 월요일 에", "다음 주 월요일에", merge=False) == [(0, "다음주", "다음 주"), (4, "월요일 에", "월요일에")]
 assert all(units[int(s["p"][1])]["text"][s["at"]:].startswith(s["o"]) for s in r["s"])
 sty = [x for x in SEEN if "교정기" not in x[0]][-1]
-assert "부서장 승인 요청" in sty[0] and "[p1] 금액" in sty[1] and any("교정기" in x[0] and "공문서" in x[0] for x in SEEN)
+assert "부서장 승인 요청" in sty[0] and "[p1] ▶ 금액" in sty[1] and any("교정기" in x[0] and "공문서" in x[0] for x in SEEN)
 assert app.check([{"id": "p0", "text": "  "}], P) == {"s": [], "dropped": 0}
 try:
     app.check(units, P, stop=lambda: True); assert False
 except app.Cancelled:
     pass
+
+# 2-1) 글 파악·규칙 검사·문맥 붙여 검사 (가짜 LLM)
+DOC = "장비 구매 요청\n1. 위와 같이 고속 카메라 구매를 요청함.\n  가. 금액: 1,200만 원\n2. 고속카메라는 LSTM 분석에 씀.\n3. 총 1,500만 원 집행을 승인 바람.\n4. 회의는 2026. 10. 15.(수)임.\n붙임  견적서 1부."
+hp = app.heur_profile(DOC)
+assert hp["style"] == "개조식" and hp["variants"][0]["first"] == "spaced" and hp["abbr"][0]["a"] == "LSTM" and not hp["abbr"][0]["def"]
+rules, ver = app.rule_checks(DOC, range(8), P, hp)
+rr = {(x["i"], x["o"], x["n"]) for x in rules}
+assert (1, "위와 같이", "위와 같이") in rr and (3, "고속카메라", "고속 카메라") in rr and (3, "LSTM", "LSTM") in rr, rr
+assert (4, "1,500만 원", "1,500만 원") in rr and (5, "수", "목") in rr and (6, "1부.", "1부.  끝.") in rr, rr
+assert app.rule_checks(DOC.replace("(수)", "(목)"), [5], P, hp)[1]                       # 맞는 요일은 verified
+ut = app.rule_checks(DOC, [1], P, app.heur_profile(DOC) | {"user": {"terms": "고속카메라"}})[0]
+assert any(x["o"] == "고속 카메라" and x["n"] == "고속카메라" for x in ut)                 # 사용자가 정한 표기가 기준
+assert app.josa("장비", "이", "가") == "가" and app.josa("카메라", "으로", "로") == "로" and app.josa("결과", "이", "가") == "가" and app.josa("용어", "으로", "로") == "로"
+SEEN.clear()
+cd = app.check_doc(DOC, [3], P, "승인 요청", "제목", {"llm": {"ask": "카메라 구매 승인"}, "user": {"style": "개조식"}})
+sty = [x for x in SEEN if "교정기" not in x[0]][-1]
+assert "위치: 본문 4/7" in sty[1] and "앞: «1. 위와 같이" in sty[1] and "뒤: «3. 총" in sty[1] and "▶ 2. 고속카메라는" in sty[1], sty[1]
+assert "핵심 요청·주장: 카메라 구매 승인" in sty[0] and "사용자 지정" in sty[0] and "제목: 제목" in sty[0]
+assert any("고속 카메라" in x[0] for x in SEEN if "교정기" in x[0])                       # 맞춤법 검사에도 정한 용어 표기
+assert all(x["i"] == 3 for x in cd["s"]) and any(x.get("src") == "rule" for x in cd["s"])
 
 # 3) 전체 검토: 본문에 없는 인용은 비움
 rv = app.review("회의는 월요일. 참석 바랍니다요.", P)
@@ -108,7 +130,11 @@ def call(path, body=None, user=None):
 
 
 c, b = call("/api/check", {"rid": "r1", "units": units, "persona": P, "purpose": ""})
-assert c == 200 and len(json.loads(b)["s"]) == 5 and "ms" in json.loads(b)
+assert c == 200 and len(json.loads(b)["s"]) == 4 and "ms" in json.loads(b)
+c, b = call("/api/check", {"rid": "r3", "pass": "rules", "text": DOC, "idx": [5], "persona": P})
+assert c == 200 and any(x["o"] == "수" and x["n"] == "목" and x["i"] == 5 for x in json.loads(b)["s"])
+c, b = call("/api/profile", {"text": DOC, "llm": False})
+assert c == 200 and json.loads(b)["style"] == "개조식" and "llm" not in json.loads(b)
 c, b = call("/api/check", {"rid": "r2", "pass": "style", "units": units, "persona": P})
 assert c == 200 and "맞춤법" not in [s["c"] for s in json.loads(b)["s"]]
 c, b = call("/api/docs", {"text": "앨리스 글"}, "alice")
