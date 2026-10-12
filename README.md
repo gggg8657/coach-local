@@ -2,6 +2,8 @@
 
 공문서·편지·논문·사설·메일처럼 **글 종류(페르소나)와 목적**을 정해 두고 글을 쓰면, 잠깐 멈출 때마다 바뀐 문단만 로컬 LLM이 다시 읽고 고칠 곳을 밑줄과 카드로 제안하는 웹 UI / CLI입니다.
 
+> ⚠️ 연구·내부 시험용 프로토타입입니다(배포·상업 서비스용 아님). 제3자 구성요소의 라이선스는 THIRD_PARTY_NOTICES.md 를 확인하세요.
+
 ![글쓰기 코치 실행 화면 — ① 밑줄을 누르면 뜨는 제안 상자 ② 분류별 모두 적용·무시 ③ 글 종류와 목적 한 줄](docs/img/coach-usage.png)
 
 ## 무엇을 하나
@@ -113,11 +115,15 @@ python3 selftest.py               # LLM 없이(가짜 LLM) 자리 확인·문서
 ## 출처·감사 (Credits)
 
 - 파이썬 표준 라이브러리만 씁니다. hwp·hwpx·pdf 불러오기는 같은 저작자의 [kordoc-local](https://github.com/gggg8657/kordoc-local)에 설치된 [kordoc](https://github.com/chrisryugj/kordoc)(MIT) CLI를 실행합니다. 이 저장소에는 동봉하지 않습니다.
-- **LLM 실행** — OpenAI 호환 API로 호출합니다(모델 가중치는 동봉하지 않음). 기본 배포는 [Ollama](https://github.com/ollama/ollama)(MIT) 위의 Google [Gemma](https://ai.google.dev/gemma) `gemma4:31b`입니다. 모델 이용 조건은 Gemma 배포처를 참고하세요.
+- **LLM 실행** — OpenAI 호환 API로 호출합니다(모델 가중치는 동봉하지 않음). 기본 배포는 [Ollama](https://github.com/ollama/ollama) (MIT) 위의 Google [Gemma 4](https://huggingface.co/google/gemma-4-31B-it) `gemma4:31b` (모델 카드 기준 Apache-2.0). `LLM_MODEL` 을 주지 않으면 코드 기본값은 `qwen3:8b` ([Qwen3](https://huggingface.co/Qwen/Qwen3-8B), Apache-2.0). 다른 모델을 쓰면 그 모델의 라이선스를 확인하세요.
 - 이 도구는 [agent-page-portal](https://github.com/gggg8657/agent-page-portal)에 연결해 쓰도록 만들었습니다(단독 실행도 됨).
 
-저작권 표기와 전체 목록은 `NOTICE`를 보세요.
+저작권 표기는 `NOTICE`, 제3자 구성요소 전체 목록·라이선스·상업 이용 확인 사항은 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 를 보세요.
 
 ## 라이선스
 
 [MIT License](LICENSE) © 2026 DongJu Kim (gggg8657).
+
+## 만든 사람
+
+DongJu Kim (gggg8657) — 설계·구현

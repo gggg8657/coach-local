@@ -1,16 +1,21 @@
 coach-local
 ===========
 
-Original work (MIT). 표준 라이브러리만 사용하며 제3자 코드·글꼴·데이터를 동봉하지 않습니다.
+이 저장소의 원저작물(코드·UI·프롬프트·문서·도구 설계)은 DongJu Kim(김동주, gggg8657)이 작성했다.
+제3자 구성요소는 각자의 라이선스를 따르며 THIRD_PARTY_NOTICES.md 에 적었다.
+제3자 구성요소의 권리는 이 저장소의 라이선스로 바뀌지 않는다.
+연구·내부 시험용 프로토타입이며 배포·상업 서비스용이 아니다.
+화면 하단·메타데이터의 저작자 표기는 지우거나 바꾸지 마세요.
+
+Original work (MIT) — Copyright (c) 2026 DongJu Kim (gggg8657) <dongjukim.dev@gmail.com>.
+표준 라이브러리만 사용하며 제3자 코드·글꼴·데이터를 동봉하지 않습니다.
 .docx 읽기·쓰기는 표준 라이브러리(zipfile·xml)로 직접 합니다(python-docx 미사용).
 hwp·hwpx·pdf 불러오기는 옆 폴더의 kordoc-local 이 설치돼 있을 때 그 안의 kordoc CLI
-(https://github.com/chrisryugj/kordoc, MIT)를 실행해서 씁니다 — 이 패키지에 동봉하지 않습니다.
+(https://github.com/chrisryugj/kordoc, MIT, Copyright (c) chrisryugj)를 실행해서 씁니다 — 이 패키지에 동봉하지 않습니다.
 기본 페르소나(personas.json)의 공문서 표기 관례는 행정업무운영 편람의 일반 관례를 요약해 새로 쓴 것입니다.
 
-Files authored for this package (MIT): app.py, ui.html, personas.json, selftest.py, setup.sh, README.md
+Files authored for this package (MIT): app.py, ui.html, personas.json, selftest.py, setup.sh, README.md, THIRD_PARTY_NOTICES.md
 
 LLM (not bundled): called via an OpenAI-compatible API; default deployment is Ollama (https://github.com/ollama/ollama, MIT)
-  serving Google Gemma (gemma4:31b, https://ai.google.dev/gemma — see Gemma's terms of use).
-
-This package: Copyright (c) 2026 DongJu Kim (gggg8657) <dongjukim.dev@gmail.com>
-화면 하단·메타데이터의 저작자 표기는 지우거나 바꾸지 마세요.
+  serving Google Gemma 4 (gemma4:31b; model card google/gemma-4-31B-it: Apache-2.0, https://ai.google.dev/gemma/docs/gemma_4_license).
+  Code fallback when LLM_MODEL is unset: qwen3:8b (Qwen/Qwen3-8B, Apache-2.0).
