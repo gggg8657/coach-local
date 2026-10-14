@@ -12,6 +12,7 @@
 누구나 받는 경로: GET /healthz → {"ok": true, "tool": …, "version": …} (사용자 정보·데이터 없음, 헬스체크용).
 
 도구 간 호출(예: avatar → tts, writer → kordoc)은 같은 키로 서명해서 보냄: headers.update(portal_auth.sign(user)).
+오류 응답에는 scrub(문장) — 서버 절대 경로·내부 주소를 감춤(예외 문장을 그대로 내보내지 않게).
 키는 포털 비밀값에서 만든 값 하나를 모든 도구가 함께 씀(도구끼리 서로 부르므로). 로그·화면·응답에 찍지 말 것.
 
 쓰는 법(도구 app.py 맨 아래 서버 줄):
@@ -19,7 +20,7 @@
   ThreadingHTTPServer((os.environ.get("BIND", "127.0.0.1"), PORT), portal_auth.install(H, "kordoc-local")).serve_forever()
 
 Copyright (c) 2026 gggg8657 (DongJu Kim). 이 파일은 각 도구 저장소에 그대로 복사해 씀(원본: agent-page-portal/sdk/portal_auth.py)."""
-import hashlib, hmac, ipaddress, json, os, subprocess, time
+import hashlib, hmac, ipaddress, json, os, re, subprocess, time
 
 VERSION = "1"
 SKEW = 300   # 서명 시각 허용 오차(초)
@@ -58,6 +59,15 @@ def verify(user, auth, now=None):
     if abs((now if now is not None else time.time()) - int(parts[1])) > SKEW:
         return False
     return hmac.compare_digest(parts[2], _mac(key, parts[1], user))
+
+
+_PATH = re.compile(r"(?<![\w.])/(?:home|root|app|data|srv|opt|tmp|var|usr|mnt|models|shared|workspace)(?:/[^\s'\"),;]*)?")
+_HOST = re.compile(r"\bhttps?://[^\s'\"/]+")
+
+
+def scrub(msg):
+    """오류 문장에서 서버 절대 경로·내부 주소(http://호스트:포트)를 감춤 — 응답·화면에 내보내기 전에"""
+    return _HOST.sub("<내부주소>", _PATH.sub("<경로>", str(msg)))
 
 
 def _nets():

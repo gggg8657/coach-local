@@ -27,6 +27,7 @@ import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from xml.sax.saxutils import escape
+import portal_auth  # 포털 서명 확인 관문·오류 문장 정리(원본 agent-page-portal/sdk/portal_auth.py)
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WS = os.environ.get("WORKSPACE") or os.path.join(ROOT, "_workspace")  # 포털이 AGENT_DATA/<도구> 로 모아 줌
@@ -828,12 +829,14 @@ class H(BaseHTTPRequestHandler):
             m = re.fullmatch(rf"/api/docs/({DOC_RE})", self.path)
             if m:
                 return self._send(read(doc_path(m.group(1), ws)).encode())
+            if self.path.split("?")[0].startswith("/api/"):   # 없는 API 경로는 화면 대신 JSON 404
+                return self._send({"error": "not found"}, code=404)
             self._send(signed(HTML.replace("%MODEL%", json.dumps(MODEL)).replace("%CATS%", json.dumps(CATS, ensure_ascii=False))).encode(),
                        "text/html; charset=utf-8")
         except FileNotFoundError:
             self._send({"error": "없음"}, code=404)
         except Exception as e:
-            self._send({"error": f"{type(e).__name__}: {e}"}, code=500)
+            self._send({"error": portal_auth.scrub(f"{type(e).__name__}: {e}")}, code=500)
 
     def do_POST(self):
         ws, who = user_ws(self), self.headers.get("X-Agent-User") or "owner"
@@ -904,7 +907,7 @@ class H(BaseHTTPRequestHandler):
         except ValueError as e:
             self._send({"error": str(e)}, code=400)
         except Exception as e:
-            self._send({"error": f"{type(e).__name__}: {e}"}, code=500)
+            self._send({"error": portal_auth.scrub(f"{type(e).__name__}: {e}")}, code=500)
 
 
 if __name__ == "__main__":
@@ -919,4 +922,4 @@ if __name__ == "__main__":
         print(f"— 제안 {len(r['s'])}개, 자리 못 찾아 버린 것 {r['dropped']}개", file=sys.stderr)
         sys.exit(0)
     print(f"coach local → http://localhost:{PORT}  (model={MODEL}, llm={LLM_API} {LLM_BASE}, num_ctx={NUM_CTX}, personas={len(BUILTIN)})  {_SIG}")
-    ThreadingHTTPServer((os.environ.get("BIND", "127.0.0.1"), PORT), __import__("portal_auth").install(H, "coach-local")).serve_forever()
+    ThreadingHTTPServer((os.environ.get("BIND", "127.0.0.1"), PORT), portal_auth.install(H, "coach-local")).serve_forever()
