@@ -919,4 +919,4 @@ if __name__ == "__main__":
         print(f"— 제안 {len(r['s'])}개, 자리 못 찾아 버린 것 {r['dropped']}개", file=sys.stderr)
         sys.exit(0)
     print(f"coach local → http://localhost:{PORT}  (model={MODEL}, llm={LLM_API} {LLM_BASE}, num_ctx={NUM_CTX}, personas={len(BUILTIN)})  {_SIG}")
-    ThreadingHTTPServer((os.environ.get("BIND", ""), PORT), H).serve_forever()
+    ThreadingHTTPServer((os.environ.get("BIND", "127.0.0.1"), PORT), __import__("portal_auth").install(H, "coach-local")).serve_forever()
