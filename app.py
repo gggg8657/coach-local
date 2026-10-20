@@ -29,6 +29,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from xml.sax.saxutils import escape
 import portal_auth  # 포털 서명 확인 관문·오류 문장 정리(원본 agent-page-portal/sdk/portal_auth.py)
 
+try:
+    from zoneinfo import ZoneInfo
+    KST = ZoneInfo("Asia/Seoul")
+except Exception:  # tzdata 없는 환경 — 한국은 일광절약시간 없음
+    KST = datetime.timezone(datetime.timedelta(hours=9), "KST")
+
+
+def today_kst():
+    """날짜 점검의 기본 연도 등 달력 날짜는 한국 날짜 — 서버는 UTC"""
+    return datetime.datetime.now(KST).date()
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WS = os.environ.get("WORKSPACE") or os.path.join(ROOT, "_workspace")  # 포털이 AGENT_DATA/<도구> 로 모아 줌
 LLM_API = os.environ.get("LLM_API", "ollama")            # ollama | openai
@@ -465,7 +476,7 @@ def _note(i, line, o, n, r, c, at=None):
 def _date_checks(text, lines, idxs):
     """날짜·요일: 없는 날짜, 요일 틀림(앞에서 나온 연·월을 이어 받음). 맞는 날짜 자리는 verified 로 돌려 LLM 의 헛된 '사실'을 거른다."""
     out, ok = [], []
-    year, month, off = datetime.date.today().year, None, 0
+    year, month, off = today_kst().year, None, 0
     pat = re.compile(r"(?:(\d{4})\s*(?:년|\.)\s*)?(?:(\d{1,2})\s*(?:월|\.)\s*)?(\d{1,2})\s*(?:일|\.)\s*(?:\(\s*([월화수목금토일])\s*\)|([월화수목금토일])요일)?")
     for i, line in enumerate(lines):
         for m in pat.finditer(line):
