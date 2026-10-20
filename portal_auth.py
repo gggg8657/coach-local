@@ -135,8 +135,22 @@ def check(h, tool):
 _VER = {}
 
 
+def _tune_server():
+    """도구 서버(http.server ThreadingHTTPServer) 대기열: 기본 listen backlog 5 는 몰릴 때 SYN 이 버려져 1~3초씩 다시 기다림
+    (부하 시험 2026-10-20: 동시 64 이상 p99 1~4 s). TOOL_LISTEN_BACKLOG(기본 128)로 늘림. install() 은 서버를 만들기 전에 불리므로
+    (ThreadingHTTPServer((주소), install(H, …))) 여기서 바꾸면 그 서버부터 적용. daemon_threads 는 ThreadingHTTPServer 기본값(True) 그대로"""
+    import http.server
+    try:
+        n = int(os.environ.get("TOOL_LISTEN_BACKLOG") or 128)
+    except ValueError:
+        n = 128
+    if n > http.server.ThreadingHTTPServer.request_queue_size:
+        http.server.ThreadingHTTPServer.request_queue_size = n
+
+
 def install(H, tool, root=None):
-    """핸들러 클래스 H 의 do_* 앞에 관문을 붙여 돌려줌(같은 클래스). 두 번 불러도 한 번만 붙음"""
+    """핸들러 클래스 H 의 do_* 앞에 관문을 붙여 돌려줌(같은 클래스). 두 번 불러도 한 번만 붙음. 서버 대기열도 늘림(_tune_server)"""
+    _tune_server()
     if getattr(H, "_portal_auth", None):
         return H
     _VER[tool] = _version(root or os.path.dirname(os.path.abspath(__import__("sys").modules[H.__module__].__file__)))
